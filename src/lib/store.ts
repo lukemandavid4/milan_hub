@@ -1,0 +1,339 @@
+import { useSyncExternalStore } from "react";
+import type { Product } from "@/data/inventory";
+import { getCurrentUser } from "@/lib/auth";
+
+export type PaymentMethod = "M-Pesa" | "Cash" | "Card" | "Bank Transfer";
+
+export const SHOP_NAME = "Milan Hub";
+
+export type Service = {
+  id: string;
+  name: string;
+  price: number;
+  description: string;
+  payment: PaymentMethod | string;
+  at: string;
+};
+
+export type CartItem = {
+  id: string;
+  kind: "product" | "service";
+  productId?: string | undefined;
+  name: string;
+  qty: number;
+  price: number;
+  payment: PaymentMethod | string;
+  note?: string | undefined;
+  at: string;
+};
+
+export type Sale = CartItem & { soldAt: string };
+
+export type HistoryEntry = {
+  id: string;
+  kind: "product" | "service";
+  name: string;
+  action: string;
+  qty: number;
+  before: number;
+  after: number;
+  amount: number;
+  note?: string;
+  at: string;
+};
+
+export type AppState = {
+  products: Product[];
+  services: Service[];
+  cart: CartItem[];
+  sales: Sale[];
+  history: HistoryEntry[];
+};
+
+const STORAGE_KEY = "milanhub-state-v1";
+
+const emptyState: AppState = { products: [], services: [], cart: [], sales: [], history: [] };
+
+let state: AppState = emptyState;
+let hydrated = false;
+const listeners = new Set<() => void>();
+
+function persist() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+function set(next: Partial<AppState>) {
+  state = { ...state, ...next };
+  persist();
+  emit();
+}
+
+function hydrate() {
+  if (hydrated || typeof window === "undefined") return;
+  hydrated = true;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<AppState>;
+      state = { ...emptyState, ...parsed };
+      emit();
+    }
+  } catch {
+    /* ignore malformed state */
+  }
+}
+
+function subscribe(listener: () => void) {
+  hydrate();
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function useAppState(): AppState {
+  return useSyncExternalStore(
+    subscribe,
+    () => state,
+    () => emptyState,
+  );
+}
+
+const uid = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+const isAdmin = () => getCurrentUser()?.role === "admin";
+
+function logHistory(entry: Omit<HistoryEntry, "id" | "at">) {
+  state = {
+    ...state,
+    history: [{ ...entry, id: uid(), at: new Date().toISOString() }, ...state.history],
+  };
+}
+
+export const actions = {
+  addProduct(input: {
+    name: string;
+    category: string;
+    quantity: number;
+    price: number;
+    description: string;
+  }) {
+    if (!isAdmin()) return;
+    const id = uid();
+    const product: Product = {
+      id,
+      sku: `MH-${id.slice(0, 6).toUpperCase()}`,
+      name: input.name,
+      spec: input.description,
+      category: input.category,
+      quantity: input.quantity,
+      threshold: 3,
+      price: input.price,
+      updated: new Date().toISOString(),
+    };
+    logHistory({
+      kind: "product",
+      name: product.name,
+      action: "Created",
+      qty: product.quantity,
+      before: 0,
+      after: product.quantity,
+      amount: product.price,
+    });
+    set({ products: [product, ...state.products] });
+  },
+
+  updateProduct(id: string, patch: Partial<Product>) {
+    if (!isAdmin()) return;
+    set({ products: state.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  },
+
+  deleteProduct(id: string) {
+    if (!isAdmin()) return;
+    const p = state.products.find((x) => x.id === id);
+    if (p) {
+      logHistory({
+        kind: "product",
+        name: p.name,
+        action: "Deleted",
+        qty: p.quantity,
+        before: p.quantity,
+        after: 0,
+        amount: 0,
+      });
+    }
+    set({ products: state.products.filter((x) => x.id !== id) });
+  },
+
+  adjustStock(id: string, delta: number, action = delta > 0 ? "Stock Added" : "Stock Deducted") {
+    if (!isAdmin()) return;
+    const p = state.products.find((x) => x.id === id);
+    if (!p) return;
+    const after = Math.max(0, p.quantity + delta);
+    logHistory({
+      kind: "product",
+      name: p.name,
+      action,
+      qty: Math.abs(after - p.quantity),
+      before: p.quantity,
+      after,
+      amount: 0,
+    });
+    set({
+      products: state.products.map((x) => (x.id === id ? { ...x, quantity: after } : x)),
+    });
+  },
+
+  addToCart(item: {
+    name: string;
+    price: number;
+    payment: string;
+    productId?: string;
+    kind: "product" | "service";
+    note?: string;
+    qty?: number;
+  }) {
+    const existing =
+      item.kind === "product" && item.productId
+        ? state.cart.find(
+            (c) =>
+              c.productId === item.productId && c.payment === item.payment && c.kind === "product",
+          )
+        : undefined;
+    if (existing) {
+      set({
+        cart: state.cart.map((c) => (c.id === existing.id ? { ...c, qty: c.qty + 1 } : c)),
+      });
+      return;
+    }
+    set({
+      cart: [
+        {
+          id: uid(),
+          kind: item.kind,
+          productId: item.productId,
+          name: item.name,
+          price: item.price,
+          payment: item.payment,
+          note: item.note,
+          qty: item.qty ?? 1,
+          at: new Date().toISOString(),
+        },
+        ...state.cart,
+      ],
+    });
+  },
+
+  removeFromCart(id: string) {
+    set({ cart: state.cart.filter((c) => c.id !== id) });
+  },
+
+  checkout() {
+    if (state.cart.length === 0) return;
+    const soldAt = new Date().toISOString();
+    let products = state.products;
+    for (const item of state.cart) {
+      if (item.kind === "product" && item.productId) {
+        const p = products.find((x) => x.id === item.productId);
+        if (!p) continue;
+        const after = Math.max(0, p.quantity - item.qty);
+        logHistory({
+          kind: "product",
+          name: p.name,
+          action: "Sold",
+          qty: item.qty,
+          before: p.quantity,
+          after,
+          amount: item.price * item.qty,
+          note: item.payment,
+        });
+        products = products.map((x) => (x.id === p.id ? { ...x, quantity: after } : x));
+      } else {
+        logHistory({
+          kind: "service",
+          name: item.name,
+          action: "Service",
+          qty: item.qty,
+          before: 0,
+          after: 0,
+          amount: item.price * item.qty,
+          note: item.payment,
+        });
+      }
+    }
+    set({
+      products,
+      cart: [],
+      sales: [...state.cart.map((c) => ({ ...c, soldAt })), ...state.sales],
+    });
+  },
+
+  addService(input: { name: string; price: number; description: string; payment: string }) {
+    const service: Service = {
+      id: uid(),
+      name: input.name,
+      price: input.price,
+      description: input.description,
+      payment: input.payment,
+      at: new Date().toISOString(),
+    };
+    set({ services: [service, ...state.services] });
+    actions.addToCart({
+      kind: "service",
+      name: service.name,
+      price: service.price,
+      payment: service.payment,
+      note: service.description,
+    });
+  },
+
+  deleteService(id: string) {
+    set({ services: state.services.filter((s) => s.id !== id) });
+  },
+};
+
+export function formatKES(value: number) {
+  return `KES ${Math.round(value).toLocaleString()}`;
+}
+
+export function formatTime(iso: string) {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat("en-KE", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+}
+
+export function monthKey(iso: string) {
+  return iso.slice(0, 7);
+}
+
+export function monthLabel(key: string) {
+  const parts = key.split("-").map(Number);
+  const y = parts[0] ?? new Date().getFullYear();
+  const m = parts[1] ?? 1;
+  return new Intl.DateTimeFormat("en-KE", { month: "long", year: "numeric" }).format(
+    new Date(y, m - 1, 1),
+  );
+}
+
+export function recentMonthOptions(count = 12) {
+  const now = new Date();
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    return { key, label: monthLabel(key) };
+  });
+}
