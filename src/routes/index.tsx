@@ -162,7 +162,7 @@ function Dashboard() {
         })}
       </div>
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-5">
+      <div className="mt-6 grid gap-5 lg:items-start lg:grid-cols-5">
         <section className="panel p-5 lg:col-span-3">
           <div className="flex items-center justify-between">
             <div>
