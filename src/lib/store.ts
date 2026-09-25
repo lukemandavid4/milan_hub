@@ -80,16 +80,6 @@ function set(next: Partial<AppState>) {
 function hydrate() {
   if (hydrated || typeof window === "undefined") return;
   hydrated = true;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<AppState>;
-      state = { ...emptyState, ...parsed };
-      emit();
-    }
-  } catch {
-    /* ignore malformed state */
-  }
   void apiRequest<{
     products: Product[];
     services: Service[];

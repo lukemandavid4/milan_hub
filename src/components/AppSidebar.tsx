@@ -39,8 +39,8 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
   const [email] = useState(() => {
-    if (typeof window === "undefined") return "milan@milanhub.io";
-    return window.localStorage.getItem("milanhub-user-email") || "milan@milanhub.io";
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("milanhub-user-email") || "";
   });
   const initials = email
     .split(/[.@\s]+/)
@@ -53,8 +53,8 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
     <aside
       data-sidebar
       className={cn(
-        "sticky top-0 flex h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
-        collapsed ? "w-[72px]" : "w-[264px]",
+        "sticky top-0 flex h-screen shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 max-md:fixed max-md:left-0 max-md:z-20",
+        collapsed ? "w-[72px] max-md:w-0 max-md:border-r-0" : "w-[264px]",
       )}
     >
       <div className={cn("flex items-center px-4 py-5", collapsed ? "justify-center" : "gap-3")}>
@@ -110,7 +110,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
               {initials}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{email}</p>
+              <p className="truncate text-sm font-medium">{email || "Current user"}</p>
               <span className="mt-1 inline-flex items-center rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
                 Admin
               </span>

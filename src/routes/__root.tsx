@@ -122,7 +122,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('milanhub-theme');if(t==='dark')document.documentElement.classList.add('dark');document.documentElement.dataset.sidebarCollapsed=localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
+              "(function(){try{var t=localStorage.getItem('milanhub-theme');document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.dataset.sidebarCollapsed=localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
           }}
         />
       </head>

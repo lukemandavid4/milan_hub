@@ -93,7 +93,7 @@ function Dashboard() {
       .filter((product) => product.category === category)
       .reduce((sum, product) => sum + product.quantity, 0),
   }));
-  const activity = history.slice(0, 8).map((entry) => ({
+  const activity = history.map((entry) => ({
     id: entry.id,
     kind: entry.action.includes("Sold")
       ? "sale"
@@ -212,7 +212,7 @@ function Dashboard() {
           </div>
         </section>
 
-        <section className="panel p-5 lg:col-span-2">
+        <section className="panel min-h-[430px] p-5 lg:col-span-2">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold">Recent Activity</h2>
