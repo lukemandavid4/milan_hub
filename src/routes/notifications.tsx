@@ -1,6 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Bell, ShieldCheck, TriangleAlert, XCircle } from "lucide-react";
+import {
+  Bell,
+  ShieldCheck,
+  TriangleAlert,
+  XCircle,
+  ShoppingBag,
+  PackageCheck,
+  UserRoundPlus,
+  CircleDot,
+} from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
 import { apiRequest } from "@/lib/api";
 import { statusOf, type StockStatus } from "@/data/inventory";
@@ -13,6 +22,30 @@ type StoredNotification = {
   title: string;
   message: string;
   createdAt: string;
+};
+
+const notificationStyle: Record<
+  string,
+  { icon: typeof Bell; iconStyle: string; badgeStyle: string; label: string }
+> = {
+  sale: {
+    icon: ShoppingBag,
+    iconStyle: "bg-primary/12 text-primary",
+    badgeStyle: "bg-primary/10 text-primary",
+    label: "Sale",
+  },
+  inventory: {
+    icon: PackageCheck,
+    iconStyle: "bg-warning/12 text-warning",
+    badgeStyle: "bg-warning/10 text-warning",
+    label: "Inventory",
+  },
+  access: {
+    icon: UserRoundPlus,
+    iconStyle: "bg-accent text-accent-foreground",
+    badgeStyle: "bg-accent text-accent-foreground",
+    label: "Access",
+  },
 };
 
 export const Route = createFileRoute("/notifications")({
@@ -119,27 +152,58 @@ function NotificationsPage() {
         </div>
       </section>
       <section className="mt-5 border-t border-border pt-5">
-        <h2 className="text-base font-semibold">Saved Notifications</h2>
-        <div className="mt-3 divide-y divide-border">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold">Saved Notifications</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Recent system activity</p>
+          </div>
+          <span className="text-xs text-muted-foreground">{notifications.length} events</span>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {notifications.slice(0, 30).map((notification) => (
-            <article key={notification.id} className="flex flex-wrap items-start gap-3 py-3">
-              <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" />
+            <article
+              key={notification.id}
+              className="flex min-h-28 items-start gap-3 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/35"
+            >
+              {(() => {
+                const style = notificationStyle[notification.kind] ?? {
+                  icon: CircleDot,
+                  iconStyle: "bg-surface-2 text-muted-foreground",
+                  badgeStyle: "bg-surface-2 text-muted-foreground",
+                  label: notification.kind,
+                };
+                const Icon = style.icon;
+                return (
+                  <span className={`grid size-10 shrink-0 place-items-center rounded-lg ${style.iconStyle}`}>
+                    <Icon className="size-[18px]" />
+                  </span>
+                );
+              })()}
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{notification.title}</p>
-                <p className="text-xs text-muted-foreground">{notification.message}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">{notification.title}</p>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${notificationStyle[notification.kind]?.badgeStyle ?? "bg-surface-2 text-muted-foreground"}`}
+                  >
+                    {notificationStyle[notification.kind]?.label ?? notification.kind}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  {notification.message}
+                </p>
+                <time className="mt-3 block text-[11px] text-muted-foreground/80">
+                  {new Intl.DateTimeFormat("en-KE", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(notification.createdAt))}
+                </time>
               </div>
-              <time className="text-xs text-muted-foreground">
-                {new Intl.DateTimeFormat("en-KE", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                }).format(new Date(notification.createdAt))}
-              </time>
             </article>
           ))}
           {notifications.length === 0 && (
-            <p className="py-3 text-sm text-muted-foreground">No saved notifications.</p>
+            <p className="col-span-full rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
+              No saved notifications.
+            </p>
           )}
         </div>
       </section>

@@ -79,6 +79,43 @@ async function start() {
       return false;
     }
   };
+  const historyWithUnloggedSales = async () => {
+    const [historyRows, saleRows] = await Promise.all([
+      history.find({}).sort({ at: -1 }).toArray(),
+      sales.find({ kind: "product" })
+        .sort({ soldAt: -1 })
+        .toArray(),
+    ]);
+    const recoveredRows = saleRows
+      .filter(
+        (sale) =>
+          sale.stockDeducted !== false &&
+          sale.historyRecorded !== true &&
+          !historyRows.some(
+            (entry) =>
+              entry.action === "Sold" &&
+              entry.name === sale.name &&
+              Number(entry.qty) === Number(sale.qty) &&
+              Math.abs(new Date(entry.at).getTime() - new Date(sale.soldAt).getTime()) < 5000,
+          ),
+      )
+      .map((sale) => ({
+        id: String(sale._id),
+        kind: "product",
+        name: sale.name,
+        action: "Sold",
+        qty: Number(sale.qty),
+        before: Number(sale.quantityBefore ?? 0),
+        after: Number(sale.quantityAfter ?? 0),
+        amount: Number(sale.price) * Number(sale.qty),
+        note: sale.payment,
+        at: sale.soldAt,
+        recoveredFromSale: true,
+      }));
+    return [...historyRows, ...recoveredRows].sort(
+      (first, second) => new Date(second.at).getTime() - new Date(first.at).getTime(),
+    );
+  };
 
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") return json(response, 204, {});
@@ -93,14 +130,17 @@ async function start() {
           products.find({}).sort({ createdAt: -1 }).toArray(),
           services.find({}).sort({ createdAt: -1 }).toArray(),
           sales.find({}).sort({ soldAt: -1 }).toArray(),
-          history.find({}).sort({ at: -1 }).toArray(),
+          historyWithUnloggedSales(),
           dailySalesCart.findOne({ _id: "current" }),
         ]);
         return json(response, 200, {
           products: productRows.map(({ _id, ...product }) => ({ ...product, id: String(_id) })),
           services: serviceRows.map(({ _id, ...service }) => ({ ...service, id: String(_id) })),
           sales: saleRows.map(({ _id, ...sale }) => ({ ...sale, id: String(_id) })),
-          history: historyRows.map(({ _id, ...entry }) => ({ ...entry, id: String(_id) })),
+          history: historyRows.map(({ _id, ...entry }) => ({
+            ...entry,
+            id: String(_id ?? entry.id),
+          })),
           cart: cartDocument?.items || [],
         });
       }
@@ -362,37 +402,40 @@ async function start() {
         const soldAt = new Date();
         const deductedByProduct = new Map();
         for (const item of items) {
+          let historyRecorded = true;
+          let quantityBefore;
+          let quantityAfter;
           if (item.kind === "product") {
             const product = productsById.get(String(item.productId));
             if (deductStock) {
-              const before = deductedByProduct.has(String(item.productId))
+              quantityBefore = deductedByProduct.has(String(item.productId))
                 ? deductedByProduct.get(String(item.productId))
                 : Number(product.quantity);
-              const after = before - Number(item.qty);
+              quantityAfter = quantityBefore - Number(item.qty);
               operation = `checkout: deduct inventory for ${product.name}`;
               const updateResult = await products.updateOne(
                 documentFilter(item.productId),
-                { $set: { quantity: after, updatedAt: soldAt } },
+                { $set: { quantity: quantityAfter, updatedAt: soldAt } },
               );
               if (updateResult.matchedCount === 0)
                 return json(response, 409, { error: `Could not update inventory for ${product.name}; refresh and retry.` });
               operation = `checkout: save history for ${product.name}`;
-              await saveHistory({
+              historyRecorded = await saveHistory({
                 kind: "product",
                 name: product.name,
                 action: "Sold",
                 qty: Number(item.qty),
-                before,
-                after,
+                before: quantityBefore,
+                after: quantityAfter,
                 amount: Number(item.price) * Number(item.qty),
                 note: item.payment,
                 at: soldAt,
               });
-              deductedByProduct.set(String(item.productId), after);
+              deductedByProduct.set(String(item.productId), quantityAfter);
             }
           } else if (item.kind === "service") {
             operation = `checkout: save service history for ${item.name}`;
-            await saveHistory({
+            historyRecorded = await saveHistory({
               kind: "service",
               name: item.name,
               action: "Service",
@@ -405,7 +448,14 @@ async function start() {
             });
           }
           operation = `checkout: save sale for ${item.name}`;
-          await sales.insertOne({ ...item, soldAt });
+          await sales.insertOne({
+            ...item,
+            soldAt,
+            stockDeducted: item.kind === "product" && deductStock,
+            historyRecorded,
+            quantityBefore,
+            quantityAfter,
+          });
         }
         operation = "checkout: clear daily cart";
         await dailySalesCart.updateOne(
@@ -419,7 +469,7 @@ async function start() {
         return json(response, 201, { ok: true });
       }
       if (request.method === "GET" && path === "/api/history")
-        return json(response, 200, { history: await history.find({}).sort({ at: -1 }).toArray() });
+        return json(response, 200, { history: await historyWithUnloggedSales() });
       return json(response, 404, { error: "Not found" });
     } catch (error) {
       console.error(`${operation} failed`, error);
