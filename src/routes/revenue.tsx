@@ -11,9 +11,10 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { useAppState, monthKey } from "@/lib/store";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useCurrentRole } from "@/lib/session";
+import { requireSession, useCurrentRole } from "@/lib/session";
 
 export const Route = createFileRoute("/revenue")({
+  beforeLoad: requireSession,
   head: () => ({ meta: [{ title: "Monthly Revenue — Milan Hub" }] }),
   component: RevenuePage,
 });

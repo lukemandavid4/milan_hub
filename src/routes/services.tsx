@@ -14,8 +14,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { actions, useAppState } from "@/lib/store";
 import { toast } from "sonner";
+import { requireSession } from "@/lib/session";
 
 export const Route = createFileRoute("/services")({
+  beforeLoad: requireSession,
   head: () => ({
     meta: [
       { title: "Services — Milan Hub" },

@@ -52,9 +52,10 @@ import { categories, statusLabels, statusOf, type Product } from "@/data/invento
 import { actions, useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useCurrentRole } from "@/lib/session";
+import { requireSession, useCurrentRole } from "@/lib/session";
 
 export const Route = createFileRoute("/products")({
+  beforeLoad: requireSession,
   head: () => ({
     meta: [
       { title: "Products — Milan Hub Inventory" },

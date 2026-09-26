@@ -14,6 +14,7 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { apiRequest } from "@/lib/api";
 import { statusOf, type StockStatus } from "@/data/inventory";
 import { useAppState } from "@/lib/store";
+import { requireSession } from "@/lib/session";
 
 type AccessRequest = { _id: string; email: string; role: string; createdAt: string };
 type StoredNotification = {
@@ -49,6 +50,7 @@ const notificationStyle: Record<
 };
 
 export const Route = createFileRoute("/notifications")({
+  beforeLoad: requireSession,
   head: () => ({ meta: [{ title: "Notifications — Milan Hub" }] }),
   component: NotificationsPage,
 });

@@ -6,12 +6,15 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  useNavigate,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "../components/ui/sonner";
+import { clearSession, getSessionExpiry, hasValidSession } from "../lib/session";
 
 function NotFoundComponent() {
   return (
@@ -139,9 +142,46 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <SessionExpiryRedirect />
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster />
     </QueryClientProvider>
   );
+}
+
+function SessionExpiryRedirect() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let timer: number | undefined;
+    let redirecting = false;
+    const checkSession = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (pathname === "/login" || redirecting) return;
+      if (!hasValidSession()) {
+        redirecting = true;
+        clearSession();
+        void navigate({ to: "/login", replace: true });
+        return;
+      }
+      timer = window.setTimeout(() => {
+        redirecting = true;
+        clearSession();
+        void navigate({ to: "/login", replace: true });
+      }, Math.max(0, getSessionExpiry() - Date.now()));
+    };
+
+    checkSession();
+    window.addEventListener("milanhub-session-change", checkSession);
+    window.addEventListener("focus", checkSession);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      window.removeEventListener("milanhub-session-change", checkSession);
+      window.removeEventListener("focus", checkSession);
+    };
+  }, [navigate, pathname]);
+
+  return null;
 }

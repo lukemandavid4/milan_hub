@@ -3,8 +3,10 @@ import { useMemo, useState } from "react";
 import { PackagePlus, RefreshCw, Search, Wrench } from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
 import { monthKey, useAppState } from "@/lib/store";
+import { requireSession } from "@/lib/session";
 
 export const Route = createFileRoute("/history")({
+  beforeLoad: requireSession,
   head: () => ({ meta: [{ title: "History — Milan Hub" }] }),
   component: HistoryPage,
 });

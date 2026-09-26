@@ -7,10 +7,12 @@ import { apiRequest } from "@/lib/api";
 import { useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { requireSession } from "@/lib/session";
 
 type SavedReport = { id: string; title: string; generatedAt: string };
 
 export const Route = createFileRoute("/report")({
+  beforeLoad: requireSession,
   head: () => ({
     meta: [
       { title: "Stock Report — Milan Hub" },

@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
-import { notifySessionChange, useCurrentRole } from "@/lib/session";
+import { clearSession, useCurrentRole } from "@/lib/session";
 
 type NavItem = {
   label: string;
@@ -135,10 +135,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
 
         <button
           onClick={() => {
-            window.localStorage.removeItem("milanhub-user-email");
-            window.localStorage.removeItem("milanhub-user-role");
-            document.documentElement.dataset.userRole = "Admin";
-            notifySessionChange();
+            clearSession();
             navigate({ to: "/login" });
           }}
           className={cn(

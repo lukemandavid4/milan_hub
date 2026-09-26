@@ -15,8 +15,10 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { categories, statusOf, type ActivityKind } from "@/data/inventory";
 import { useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { requireSession } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
+  beforeLoad: requireSession,
   head: () => ({
     meta: [
       { title: "Dashboard — Milan Hub Inventory Control" },
