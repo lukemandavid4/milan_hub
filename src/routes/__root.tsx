@@ -9,7 +9,7 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -125,7 +125,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('milanhub-theme');var mobile=matchMedia('(max-width: 767px)').matches;var role=localStorage.getItem('milanhub-user-role');document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.dataset.userRole=role&&role.toLowerCase()==='seller'?'Seller':'Admin';document.documentElement.dataset.sidebarCollapsed=mobile||localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
+              "(function(){try{var root=document.documentElement;var login=location.pathname==='/login';var t=localStorage.getItem('milanhub-theme');var mobile=matchMedia('(max-width: 767px)').matches;var role=localStorage.getItem('milanhub-user-role');if(login){t='dark';localStorage.setItem('milanhub-theme','dark')}root.dataset.loginDark=login?'true':'false';root.classList.toggle('dark',login||t!=='light');root.dataset.userRole=role&&role.toLowerCase()==='seller'?'Seller':'Admin';root.dataset.sidebarCollapsed=mobile||localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
           }}
         />
       </head>
@@ -139,6 +139,16 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  useLayoutEffect(() => {
+    const isLogin = pathname === "/login";
+    document.documentElement.dataset.loginDark = String(isLogin);
+    if (isLogin) {
+      window.localStorage.setItem("milanhub-theme", "dark");
+      document.documentElement.classList.add("dark");
+    }
+  }, [pathname]);
 
   return (
     <QueryClientProvider client={queryClient}>

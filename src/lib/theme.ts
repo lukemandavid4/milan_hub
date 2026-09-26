@@ -11,11 +11,18 @@ export function useTheme() {
   });
 
   useEffect(() => {
+    const isLogin = window.location.pathname === "/login";
+    if (isLogin) {
+      document.documentElement.classList.add("dark");
+      window.localStorage.setItem(STORAGE_KEY, "dark");
+      return;
+    }
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
   const toggle = useCallback(() => {
     setTheme((current) => {
+      if (window.location.pathname === "/login") return "dark";
       const next: Theme = current === "dark" ? "light" : "dark";
       document.documentElement.classList.toggle("dark", next === "dark");
       window.localStorage.setItem(STORAGE_KEY, next);
