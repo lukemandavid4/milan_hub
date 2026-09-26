@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Clock, CreditCard, ShoppingCart, Store, CheckCircle2, X } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { actions, formatKES, formatTime, SHOP_NAME, useAppState } from "@/lib/store";
+import { toast } from "sonner";
+import { useCurrentRole } from "@/lib/session";
 
 export function DailySalesDialog() {
   const [open, setOpen] = useState(false);
+  const role = useCurrentRole();
   const { cart } = useAppState();
   const count = cart.reduce((sum, item) => sum + item.qty, 0);
   const total = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
@@ -12,9 +15,9 @@ export function DailySalesDialog() {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <button className="relative inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:bg-primary-glow glow-ring">
-          <ShoppingCart className="size-4" />
-          Daily Sales
+        <button className="relative inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground transition-all duration-200 hover:bg-primary-glow glow-ring sm:gap-2 sm:px-4 sm:text-sm">
+          <ShoppingCart className="size-4 shrink-0" />
+          <span className="whitespace-nowrap">Daily Sales</span>
           {count > 0 && (
             <span className="absolute -right-2 -top-2 grid min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
               {count}
@@ -29,7 +32,9 @@ export function DailySalesDialog() {
             <h2 className="text-lg font-semibold">{SHOP_NAME} Sales</h2>
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
-            Items sold at {SHOP_NAME}. Deduct stock when ready.
+            {role === "Admin"
+              ? `Items sold at ${SHOP_NAME}. Deduct stock when ready.`
+              : `Record sales at ${SHOP_NAME}. Stock levels will not be changed.`}
           </p>
         </div>
 
@@ -87,14 +92,19 @@ export function DailySalesDialog() {
           </div>
           <button
             disabled={cart.length === 0}
-            onClick={() => {
-              actions.checkout();
+            onClick={async () => {
+              const saved = await actions.checkout(role === "Admin");
+              if (!saved) {
+                toast.error("Sale could not be saved. Your cart is still available to retry.");
+                return;
+              }
+              toast.success("Sale saved to the database");
               setOpen(false);
             }}
             className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow disabled:cursor-not-allowed disabled:opacity-50"
           >
             <CheckCircle2 className="size-4" />
-            Deduct {SHOP_NAME} Stock
+            {role === "Admin" ? `Deduct ${SHOP_NAME} Stock` : "Record Sales"}
           </button>
         </div>
       </SheetContent>

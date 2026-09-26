@@ -122,7 +122,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('milanhub-theme');document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.dataset.sidebarCollapsed=localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
+              "(function(){try{var t=localStorage.getItem('milanhub-theme');var mobile=matchMedia('(max-width: 767px)').matches;var role=localStorage.getItem('milanhub-user-role');document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.dataset.userRole=role&&role.toLowerCase()==='seller'?'Seller':'Admin';document.documentElement.dataset.sidebarCollapsed=mobile||localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
           }}
         />
       </head>

@@ -7,6 +7,13 @@ import { statusOf, type StockStatus } from "@/data/inventory";
 import { useAppState } from "@/lib/store";
 
 type AccessRequest = { _id: string; email: string; role: string; createdAt: string };
+type StoredNotification = {
+  id: string;
+  kind: string;
+  title: string;
+  message: string;
+  createdAt: string;
+};
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({ meta: [{ title: "Notifications — Milan Hub" }] }),
@@ -23,12 +30,18 @@ function NotificationsPage() {
     { "in-stock": 0, "low-stock": 0, "out-of-stock": 0 },
   );
   const [requests, setRequests] = useState<AccessRequest[]>([]);
+  const [notifications, setNotifications] = useState<StoredNotification[]>([]);
   const loadRequests = () =>
     void apiRequest<{ requests: AccessRequest[] }>("/access-requests").then(
       (result) => result && setRequests(result.requests),
     );
+  const loadNotifications = () =>
+    void apiRequest<{ notifications: StoredNotification[] }>("/notifications").then(
+      (result) => result && setNotifications(result.notifications),
+    );
   useEffect(() => {
     loadRequests();
+    loadNotifications();
   }, []);
   const review = (requestId: string, status: "approved" | "rejected") =>
     void apiRequest(`/access-requests/${requestId}`, {
@@ -103,6 +116,31 @@ function NotificationsPage() {
           {stockCounts["out-of-stock"] + stockCounts["low-stock"] === 0
             ? "No active stock alerts. Inventory levels are healthy."
             : `${stockCounts["out-of-stock"] + stockCounts["low-stock"]} products need attention.`}
+        </div>
+      </section>
+      <section className="mt-5 border-t border-border pt-5">
+        <h2 className="text-base font-semibold">Saved Notifications</h2>
+        <div className="mt-3 divide-y divide-border">
+          {notifications.slice(0, 30).map((notification) => (
+            <article key={notification.id} className="flex flex-wrap items-start gap-3 py-3">
+              <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">{notification.title}</p>
+                <p className="text-xs text-muted-foreground">{notification.message}</p>
+              </div>
+              <time className="text-xs text-muted-foreground">
+                {new Intl.DateTimeFormat("en-KE", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                }).format(new Date(notification.createdAt))}
+              </time>
+            </article>
+          ))}
+          {notifications.length === 0 && (
+            <p className="py-3 text-sm text-muted-foreground">No saved notifications.</p>
+          )}
         </div>
       </section>
     </DashboardShell>

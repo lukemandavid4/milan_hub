@@ -169,7 +169,14 @@ function ServicesPage() {
                   <td className="px-3 py-4 text-right">
                     <button
                       aria-label={`Delete ${service.name}`}
-                      onClick={() => actions.deleteService(service.id)}
+                      onClick={async () => {
+                        const persisted = await actions.deleteService(service.id);
+                        toast[persisted ? "success" : "error"](
+                          persisted
+                            ? "Service deleted"
+                            : "Service could not be deleted from the database",
+                        );
+                      }}
                       className="inline-grid size-8 place-items-center rounded-lg text-destructive transition-colors hover:bg-destructive/12"
                     >
                       <Trash2 className="size-4" />

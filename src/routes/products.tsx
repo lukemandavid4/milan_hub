@@ -51,6 +51,7 @@ import { categories, statusLabels, statusOf, type Product } from "@/data/invento
 import { actions, useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useCurrentRole } from "@/lib/session";
 
 export const Route = createFileRoute("/products")({
   head: () => ({
@@ -106,6 +107,7 @@ const emptyDraft: Draft = { name: "", category: "", quantity: "", price: "", des
 
 function ProductsPage() {
   const { products: items } = useAppState();
+  const role = useCurrentRole();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
   const [formOpen, setFormOpen] = useState(false);
@@ -156,13 +158,18 @@ function ProductsPage() {
     const quantity = Number(draft.quantity) || 0;
     const price = Number(draft.price) || 0;
     if (editingId) {
-      actions.updateProduct(editingId, {
+      const persisted = await actions.updateProduct(editingId, {
         name: draft.name.trim(),
         category: draft.category,
         quantity,
         price,
         spec: draft.description,
       });
+      if (!persisted) {
+        toast.error("Product could not be saved to the database");
+        return;
+      }
+      toast.success("Product updated");
     } else {
       const persisted = await actions.addProduct({
         name: draft.name.trim(),
@@ -174,32 +181,39 @@ function ProductsPage() {
       toast[persisted ? "success" : "error"](
         persisted
           ? "Product saved to MongoDB"
-          : "Product saved locally, but MongoDB could not be reached",
+          : "Product could not be saved to the database",
       );
+      if (!persisted) return;
     }
     setFormOpen(false);
   };
 
-  const adjust = (id: string, delta: number) => actions.adjustStock(id, delta);
+  const adjust = async (id: string, delta: number) => {
+    const persisted = await actions.adjustStock(id, delta);
+    toast[persisted ? "success" : "error"](
+      persisted ? "Stock updated" : "Stock could not be saved to the database",
+    );
+  };
 
-  const addSale = () => {
+  const addSale = async () => {
     if (!saleProduct) return;
-    const quantity = Math.max(1, Math.min(saleProduct.quantity, Number(saleQuantity) || 1));
-    actions.addToCart({
+    if (saleProduct.quantity <= 0) {
+      toast.error("Out-of-stock products cannot be added to daily sales");
+      return;
+    }
+    const requestedQuantity = Math.max(1, Number(saleQuantity) || 1);
+    const quantity = Math.min(saleProduct.quantity, requestedQuantity);
+    const saved = await actions.addToCart({
       kind: "product",
       name: saleProduct.name,
       price: saleProduct.price,
       payment: salePayment,
       productId: saleProduct.id,
+      quantity,
     });
-    for (let index = 1; index < quantity; index += 1) {
-      actions.addToCart({
-        kind: "product",
-        name: saleProduct.name,
-        price: saleProduct.price,
-        payment: salePayment,
-        productId: saleProduct.id,
-      });
+    if (!saved) {
+      toast.error("Product is out of stock or the sales cart could not be saved");
+      return;
     }
     setSaleProduct(null);
     setSaleQuantity("1");
@@ -221,6 +235,7 @@ function ProductsPage() {
       subtitle="Browse and manage product inventory"
       action={
         <button
+          data-admin-only
           onClick={openAdd}
           className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-foreground transition-all duration-200 hover:border-primary/40 hover:text-primary"
         >
@@ -257,9 +272,9 @@ function ProductsPage() {
         ))}
       </div>
 
-      <div className="panel mt-6 p-5">
+      <div className="panel mt-6 min-w-0 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="relative min-w-[240px] flex-1">
+          <div className="relative min-w-0 flex-1 basis-full sm:basis-auto sm:min-w-[240px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -269,6 +284,7 @@ function ProductsPage() {
             />
           </div>
           <button
+            data-admin-only
             onClick={openAdd}
             className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:bg-primary-glow glow-ring"
           >
@@ -320,10 +336,11 @@ function ProductsPage() {
                     </td>
                     <td className="px-3 py-3.5">
                       <button
+                        disabled={p.quantity <= 0}
                         onClick={() => setSaleProduct(p)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-border disabled:hover:text-muted-foreground"
                       >
-                        <ShoppingCart className="size-3.5" /> Add
+                        <ShoppingCart className="size-3.5" /> {p.quantity <= 0 ? "Out of stock" : "Add"}
                       </button>
                     </td>
                     <td className="px-3 py-3.5">
@@ -332,27 +349,35 @@ function ProductsPage() {
                           <DropdownMenuTrigger asChild>
                             <button
                               aria-label={`Actions for ${p.name}`}
+                              data-admin-only
                               className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/12 hover:text-primary"
                             >
                               <MoreHorizontal className="size-4" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48 bg-card">
-                            <DropdownMenuItem onClick={() => openEdit(p)}>
+                            {role === "Admin" && <DropdownMenuItem onClick={() => openEdit(p)}>
                               <Pencil className="size-4" /> Edit Product
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => adjust(p.id, 1)}>
+                            </DropdownMenuItem>}
+                            {role === "Admin" && <DropdownMenuItem onClick={() => adjust(p.id, 1)}>
                               <PackagePlus className="size-4" /> Add Stock
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => adjust(p.id, -1)}>
+                            </DropdownMenuItem>}
+                            {role === "Admin" && <DropdownMenuItem onClick={() => adjust(p.id, -1)}>
                               <Minus className="size-4" /> Deduct Stock
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
+                            </DropdownMenuItem>}
+                            {role === "Admin" && <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={() => actions.deleteProduct(p.id)}
+                              onClick={async () => {
+                                const persisted = await actions.deleteProduct(p.id);
+                                toast[persisted ? "success" : "error"](
+                                  persisted
+                                    ? "Product deleted"
+                                    : "Product could not be deleted from the database",
+                                );
+                              }}
                             >
                               <Trash2 className="size-4" /> Delete
-                            </DropdownMenuItem>
+                            </DropdownMenuItem>}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -477,7 +502,7 @@ function ProductsPage() {
                   id="sale-quantity"
                   type="number"
                   min="1"
-                  max={saleProduct?.quantity}
+                  max={saleProduct && saleProduct.quantity > 0 ? saleProduct.quantity : undefined}
                   value={saleQuantity}
                   onChange={(event) => setSaleQuantity(event.target.value)}
                   className="bg-surface-2"
@@ -494,7 +519,11 @@ function ProductsPage() {
               </div>
             </div>
             <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Available: {saleProduct?.quantity ?? 0}</span>
+              <span>
+                {saleProduct?.quantity === 0
+                  ? "Out of stock; cannot add to sale"
+                  : `Available: ${saleProduct?.quantity ?? 0}`}
+              </span>
               <span>Listed: KES {saleProduct?.price.toLocaleString() ?? 0}</span>
             </div>
             <div className="rounded-xl border border-border bg-surface-2 p-4 text-center text-lg font-bold">
@@ -532,6 +561,7 @@ function ProductsPage() {
               <button
                 type="button"
                 onClick={addSale}
+                disabled={!saleProduct || saleProduct.quantity <= 0}
                 className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
               >
                 Add to Sales

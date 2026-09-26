@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDownRight, ArrowUpRight, Box, ChartNoAxesColumnIncreasing } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Box, ChartNoAxesColumnIncreasing, Save } from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
+import { apiRequest } from "@/lib/api";
 import { useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+
+type SavedReport = { id: string; title: string; generatedAt: string };
 
 export const Route = createFileRoute("/report")({
   head: () => ({
@@ -28,6 +32,12 @@ export const Route = createFileRoute("/report")({
 
 function ReportPage() {
   const { history } = useAppState();
+  const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
+  useEffect(() => {
+    void apiRequest<{ reports: SavedReport[] }>("/reports").then((result) => {
+      if (result) setSavedReports(result.reports);
+    });
+  }, []);
   const movement = useMemo(() => {
     const byDate = new Map<string, { date: string; added: number; deducted: number }>();
     history.forEach((entry) => {
@@ -81,8 +91,44 @@ function ReportPage() {
       style: "text-warning bg-warning/12",
     },
   ];
+  const saveReport = async () => {
+    const generatedAt = new Date().toISOString();
+    const result = await apiRequest<{ report: SavedReport }>("/reports", {
+      method: "POST",
+      body: JSON.stringify({
+        title: `Stock Report · ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date(generatedAt))}`,
+        data: {
+          movement,
+          totals: {
+            added: metrics[0].value,
+            deducted: metrics[1].value,
+            transactions: history.length,
+            quantityChanged: history.reduce((sum, entry) => sum + entry.qty, 0),
+          },
+        },
+      }),
+    });
+    if (!result) {
+      toast.error("Report could not be saved to the database");
+      return;
+    }
+    setSavedReports((reports) => [result.report, ...reports]);
+    toast.success("Report snapshot saved");
+  };
   return (
-    <DashboardShell title="Stock Report" subtitle="30-day inventory movement overview">
+    <DashboardShell
+      title="Stock Report"
+      subtitle="30-day inventory movement overview"
+      action={
+        <button
+          type="button"
+          onClick={saveReport}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground sm:px-4 sm:text-sm"
+        >
+          <Save className="size-4" /> Save Report
+        </button>
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map(({ label, value, icon: Icon, style }) => (
           <section key={label} className="panel flex items-center justify-between p-5">
@@ -192,6 +238,28 @@ function ReportPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+      <section className="mt-5 border-t border-border pt-5">
+        <h2 className="text-base font-semibold">Saved Reports</h2>
+        <div className="mt-3 space-y-2">
+          {savedReports.slice(0, 8).map((report) => (
+            <div
+              key={report.id}
+              className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 py-3 text-sm"
+            >
+              <span className="font-medium">{report.title}</span>
+              <time className="text-xs text-muted-foreground">
+                {new Intl.DateTimeFormat("en-KE", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(report.generatedAt))}
+              </time>
+            </div>
+          ))}
+          {savedReports.length === 0 && (
+            <p className="py-3 text-sm text-muted-foreground">No saved report snapshots.</p>
+          )}
         </div>
       </section>
     </DashboardShell>

@@ -12,6 +12,7 @@ import {
 import { useState, type FormEvent } from "react";
 import loginBackground from "@/assets/login-tech-bg.jpg";
 import { apiRequestResult } from "@/lib/api";
+import { notifySessionChange } from "@/lib/session";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
@@ -58,6 +59,8 @@ function LoginPage() {
       if (result.ok && result.data?.user) {
         window.localStorage.setItem("milanhub-user-email", result.data.user.email);
         window.localStorage.setItem("milanhub-user-role", result.data.user.role);
+        document.documentElement.dataset.userRole = result.data.user.role;
+        notifySessionChange();
         toast.success("Signed in successfully");
         navigate({ to: "/" });
       } else {

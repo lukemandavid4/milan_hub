@@ -11,6 +11,7 @@ import { DashboardShell } from "@/components/DashboardShell";
 import { useAppState, monthKey } from "@/lib/store";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useCurrentRole } from "@/lib/session";
 
 export const Route = createFileRoute("/revenue")({
   head: () => ({ meta: [{ title: "Monthly Revenue — Milan Hub" }] }),
@@ -23,6 +24,7 @@ const monthOptions = Array.from({ length: 12 }, (_, index) => ({
 }));
 
 function RevenuePage() {
+  const role = useCurrentRole();
   const { sales } = useAppState();
   const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date().toISOString()));
   const filteredSales = sales.filter((sale) => monthKey(sale.soldAt) === selectedMonth);
@@ -67,6 +69,14 @@ function RevenuePage() {
       style: "text-teal-400 bg-teal-400/12",
     },
   ];
+
+  if (role === "Seller") {
+    return (
+      <div className="grid min-h-screen place-items-center px-4 text-center text-sm text-muted-foreground">
+        Revenue is available to administrators only.
+      </div>
+    );
+  }
 
   return (
     <DashboardShell

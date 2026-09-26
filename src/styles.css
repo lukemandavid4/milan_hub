@@ -156,6 +156,18 @@
     width: 72px;
   }
 
+  @media (max-width: 767px) {
+    html[data-sidebar-collapsed="true"] [data-sidebar] {
+      width: 0;
+      border-right-width: 0;
+    }
+  }
+
+  html[data-user-role="Seller"] [data-admin-only],
+  html[data-user-role="Seller"] [data-admin-page] {
+    display: none !important;
+  }
+
   * {
     border-color: var(--color-border);
   }

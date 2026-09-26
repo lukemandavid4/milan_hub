@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
+import { notifySessionChange, useCurrentRole } from "@/lib/session";
 
 type NavItem = {
   label: string;
@@ -37,6 +38,7 @@ const nav: NavItem[] = [
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { theme, toggle } = useTheme();
+  const role = useCurrentRole();
   const navigate = useNavigate();
   const [email] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -81,13 +83,14 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
       </div>
 
       <nav className={cn("flex-1 space-y-1 overflow-y-auto py-2", collapsed ? "px-2" : "px-3")}>
-        {nav.map(({ label, icon: Icon, to }) => {
+        {nav.filter(({ to }) => role !== "Seller" || to !== "/revenue").map(({ label, icon: Icon, to }) => {
           const active = pathname === to;
           return (
             <Link
               key={label}
               to={to}
               title={label}
+              data-admin-only={to === "/revenue" ? true : undefined}
               className={cn(
                 "group flex items-center rounded-xl py-2.5 text-sm font-medium transition-all duration-200",
                 collapsed ? "justify-center px-0" : "gap-3 px-3",
@@ -112,7 +115,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{email || "Current user"}</p>
               <span className="mt-1 inline-flex items-center rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
-                Admin
+                {role}
               </span>
             </div>
           </div>
@@ -131,7 +134,13 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
         </button>
 
         <button
-          onClick={() => navigate({ to: "/login" })}
+          onClick={() => {
+            window.localStorage.removeItem("milanhub-user-email");
+            window.localStorage.removeItem("milanhub-user-role");
+            document.documentElement.dataset.userRole = "Admin";
+            notifySessionChange();
+            navigate({ to: "/login" });
+          }}
           className={cn(
             "mt-1 flex w-full items-center gap-2 rounded-xl py-2 text-sm text-muted-foreground transition-colors hover:bg-destructive/12 hover:text-destructive",
             collapsed ? "justify-center px-0" : "px-3",
