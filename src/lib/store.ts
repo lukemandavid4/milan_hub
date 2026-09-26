@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { Product } from "@/data/inventory";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, apiRequestResult } from "@/lib/api";
 
 export type PaymentMethod = "M-Pesa" | "Cash";
 
@@ -280,20 +280,20 @@ export const actions = {
     return saved !== null;
   },
 
-  async checkout(deductStock = true) {
+  async checkout(deductStock = true): Promise<{ ok: boolean; error: string | null }> {
     await waitForHydration();
-    if (state.cart.length === 0) return false;
+    if (state.cart.length === 0) return { ok: false, error: "There are no items to check out." };
     const items = state.cart;
-    const persisted = await apiRequest<{ ok: boolean }>("/sales/checkout", {
+    const result = await apiRequestResult<{ ok: boolean }>("/sales/checkout", {
       method: "POST",
       body: JSON.stringify({ items, deductStock }),
     });
-    if (!persisted) return false;
+    if (!result.ok) return { ok: false, error: result.error };
 
-      const remote = await apiRequest<AppState>("/state");
+    const remote = await apiRequest<AppState>("/state");
     if (remote) {
       set(remote);
-      return true;
+      return { ok: true, error: null };
     }
 
     const soldAt = new Date().toISOString();
@@ -312,7 +312,7 @@ export const actions = {
       sales: [...items.map((c) => ({ ...c, soldAt })), ...state.sales],
     });
     await apiRequest("/cart", { method: "PUT", body: JSON.stringify({ cart: [] }) });
-    return true;
+    return { ok: true, error: null };
   },
 
   async addService(input: { name: string; price: number; description: string; payment: string }) {

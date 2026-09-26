@@ -61,13 +61,30 @@ async function start() {
   await notifications.createIndex({ createdAt: -1 });
   await reports.createIndex({ generatedAt: -1 });
 
-  const createNotification = (kind, title, message) =>
-    notifications.insertOne({ kind, title, message, read: false, createdAt: new Date() });
+  const createNotification = async (kind, title, message) => {
+    try {
+      await notifications.insertOne({ kind, title, message, read: false, createdAt: new Date() });
+      return true;
+    } catch (error) {
+      console.error("Unable to save notification", error);
+      return false;
+    }
+  };
+  const saveHistory = async (entry) => {
+    try {
+      await history.insertOne(entry);
+      return true;
+    } catch (error) {
+      console.error("Unable to save inventory history", error);
+      return false;
+    }
+  };
 
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") return json(response, 204, {});
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
     const path = url.pathname;
+    let operation = `${request.method} ${path}`;
     try {
       if (request.method === "GET" && path === "/api/health")
         return json(response, 200, { ok: true });
@@ -225,7 +242,7 @@ async function start() {
           updatedAt: new Date(),
         };
         const result = await products.insertOne(product);
-        await history.insertOne({
+        await saveHistory({
           kind: "product",
           name: product.name,
           action: "Created",
@@ -247,7 +264,7 @@ async function start() {
           $set: { ...body, updatedAt: new Date() },
         });
         if (body.quantity !== undefined && Number(body.quantity) !== Number(existing.quantity))
-          await history.insertOne({
+          await saveHistory({
             kind: "product",
             name: body.name || existing.name,
             action: "Stock Updated",
@@ -266,7 +283,7 @@ async function start() {
         const product = await products.findOne(documentFilter(productKey));
         if (!product) return json(response, 404, { error: "Product not found" });
         await products.deleteOne(documentFilter(productKey));
-        await history.insertOne({
+        await saveHistory({
           kind: "product",
           name: product.name,
           action: "Deleted",
@@ -314,38 +331,68 @@ async function start() {
       if (request.method === "GET" && path === "/api/sales")
         return json(response, 200, { sales: await sales.find({}).sort({ soldAt: -1 }).toArray() });
       if (request.method === "POST" && path === "/api/sales/checkout") {
+        operation = "checkout: parse cart";
         const body = await readBody(request);
         const items = Array.isArray(body.items) ? body.items : [];
         if (!items.length) return json(response, 400, { error: "At least one sale is required" });
         if (items.some((item) => !Number.isInteger(Number(item.qty)) || Number(item.qty) < 1))
           return json(response, 400, { error: "Sale quantities must be positive whole numbers" });
         const deductStock = body.deductStock !== false;
-        const soldAt = new Date();
+        const productLines = new Map();
         for (const item of items) {
           if (item.kind === "product") {
-            const product = await products.findOne(documentFilter(item.productId));
-            if (!product || Number(product.quantity) <= 0 || Number(product.quantity) < Number(item.qty))
-              return json(response, 409, { error: `Insufficient stock for ${item.name}` });
+            if (!item.productId)
+              return json(response, 400, { error: `Product ID is missing for ${item.name}` });
+            const key = String(item.productId);
+            const line = productLines.get(key) || { qty: 0, name: item.name };
+            line.qty += Number(item.qty);
+            productLines.set(key, line);
+          } else if (item.kind !== "service") {
+            return json(response, 400, { error: `Invalid sale item type for ${item.name}` });
+          }
+        }
+        const productsById = new Map();
+        operation = "checkout: validate stock";
+        for (const [productId, line] of productLines) {
+          const product = await products.findOne(documentFilter(productId));
+          if (!product || Number(product.quantity) <= 0 || Number(product.quantity) < line.qty)
+            return json(response, 409, { error: `Insufficient stock for ${line.name}` });
+          productsById.set(productId, product);
+        }
+        const soldAt = new Date();
+        const deductedByProduct = new Map();
+        for (const item of items) {
+          if (item.kind === "product") {
+            const product = productsById.get(String(item.productId));
             if (deductStock) {
-              const after = Number(product.quantity) - Number(item.qty);
-              await products.updateOne(
+              const before = deductedByProduct.has(String(item.productId))
+                ? deductedByProduct.get(String(item.productId))
+                : Number(product.quantity);
+              const after = before - Number(item.qty);
+              operation = `checkout: deduct inventory for ${product.name}`;
+              const updateResult = await products.updateOne(
                 documentFilter(item.productId),
                 { $set: { quantity: after, updatedAt: soldAt } },
               );
-              await history.insertOne({
+              if (updateResult.matchedCount === 0)
+                return json(response, 409, { error: `Could not update inventory for ${product.name}; refresh and retry.` });
+              operation = `checkout: save history for ${product.name}`;
+              await saveHistory({
                 kind: "product",
                 name: product.name,
                 action: "Sold",
                 qty: Number(item.qty),
-                before: Number(product.quantity),
+                before,
                 after,
                 amount: Number(item.price) * Number(item.qty),
                 note: item.payment,
                 at: soldAt,
               });
+              deductedByProduct.set(String(item.productId), after);
             }
           } else if (item.kind === "service") {
-            await history.insertOne({
+            operation = `checkout: save service history for ${item.name}`;
+            await saveHistory({
               kind: "service",
               name: item.name,
               action: "Service",
@@ -357,14 +404,17 @@ async function start() {
               at: soldAt,
             });
           }
+          operation = `checkout: save sale for ${item.name}`;
           await sales.insertOne({ ...item, soldAt });
         }
+        operation = "checkout: clear daily cart";
         await dailySalesCart.updateOne(
           { _id: "current" },
           { $set: { items: [], updatedAt: soldAt } },
           { upsert: true },
         );
         const total = items.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0);
+        operation = "checkout: create notification";
         await createNotification("sale", "Sale recorded", `${items.length} line items totaling KES ${total.toLocaleString()} were recorded.`);
         return json(response, 201, { ok: true });
       }
@@ -372,7 +422,7 @@ async function start() {
         return json(response, 200, { history: await history.find({}).sort({ at: -1 }).toArray() });
       return json(response, 404, { error: "Not found" });
     } catch (error) {
-      console.error(error);
+      console.error(`${operation} failed`, error);
       return json(response, 500, { error: "Internal server error" });
     }
   });

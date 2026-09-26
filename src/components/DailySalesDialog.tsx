@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Clock, CreditCard, ShoppingCart, Store, CheckCircle2, X } from "lucide-react";
+import { Clock, CreditCard, ShoppingCart, Store, CheckCircle2, LoaderCircle, X } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { actions, formatKES, formatTime, SHOP_NAME, useAppState } from "@/lib/store";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import { useCurrentRole } from "@/lib/session";
 
 export function DailySalesDialog() {
   const [open, setOpen] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
   const role = useCurrentRole();
   const { cart } = useAppState();
   const count = cart.reduce((sum, item) => sum + item.qty, 0);
@@ -64,8 +65,9 @@ export function DailySalesDialog() {
                   </span>
                   <button
                     aria-label={`Remove ${item.name}`}
+                    disabled={isCheckingOut}
                     onClick={() => actions.removeFromCart(item.id)}
-                    className="grid size-7 place-items-center rounded-md text-destructive transition-colors hover:bg-destructive/12"
+                    className="grid size-7 place-items-center rounded-md text-destructive transition-colors hover:bg-destructive/12 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <X className="size-4" />
                   </button>
@@ -91,20 +93,29 @@ export function DailySalesDialog() {
             <p className="text-lg font-bold text-primary">{formatKES(total)}</p>
           </div>
           <button
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || isCheckingOut}
             onClick={async () => {
-              const saved = await actions.checkout(role === "Admin");
-              if (!saved) {
-                toast.error("Sale could not be saved. Your cart is still available to retry.");
-                return;
+              setIsCheckingOut(true);
+              try {
+                const result = await actions.checkout(role === "Admin");
+                if (!result.ok) {
+                  toast.error(result.error || "Sale could not be saved. Your cart is still available to retry.");
+                  return;
+                }
+                toast.success(role === "Admin" ? "Sale saved and stock deducted" : "Sale saved");
+                setOpen(false);
+              } finally {
+                setIsCheckingOut(false);
               }
-              toast.success("Sale saved to the database");
-              setOpen(false);
             }}
             className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <CheckCircle2 className="size-4" />
-            {role === "Admin" ? `Deduct ${SHOP_NAME} Stock` : "Record Sales"}
+            {isCheckingOut ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+            {isCheckingOut
+              ? "Saving sale..."
+              : role === "Admin"
+                ? `Deduct ${SHOP_NAME} Stock`
+                : "Record Sales"}
           </button>
         </div>
       </SheetContent>

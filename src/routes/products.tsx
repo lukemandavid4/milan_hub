@@ -22,6 +22,7 @@ import {
   PackagePlus,
   Minus,
   ShoppingCart,
+  LoaderCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,6 +117,7 @@ function ProductsPage() {
   const [saleProduct, setSaleProduct] = useState<Product | null>(null);
   const [saleQuantity, setSaleQuantity] = useState("1");
   const [salePayment, setSalePayment] = useState<"M-Pesa" | "Cash">("M-Pesa");
+  const [isAddingSale, setIsAddingSale] = useState(false);
 
   const filtered = useMemo(
     () =>
@@ -196,27 +198,32 @@ function ProductsPage() {
   };
 
   const addSale = async () => {
-    if (!saleProduct) return;
-    if (saleProduct.quantity <= 0) {
-      toast.error("Out-of-stock products cannot be added to daily sales");
-      return;
+    if (!saleProduct || isAddingSale) return;
+    setIsAddingSale(true);
+    try {
+      if (saleProduct.quantity <= 0) {
+        toast.error("Out-of-stock products cannot be added to daily sales");
+        return;
+      }
+      const requestedQuantity = Math.max(1, Number(saleQuantity) || 1);
+      const quantity = Math.min(saleProduct.quantity, requestedQuantity);
+      const saved = await actions.addToCart({
+        kind: "product",
+        name: saleProduct.name,
+        price: saleProduct.price,
+        payment: salePayment,
+        productId: saleProduct.id,
+        quantity,
+      });
+      if (!saved) {
+        toast.error("Product is out of stock or the sales cart could not be saved");
+        return;
+      }
+      setSaleProduct(null);
+      setSaleQuantity("1");
+    } finally {
+      setIsAddingSale(false);
     }
-    const requestedQuantity = Math.max(1, Number(saleQuantity) || 1);
-    const quantity = Math.min(saleProduct.quantity, requestedQuantity);
-    const saved = await actions.addToCart({
-      kind: "product",
-      name: saleProduct.name,
-      price: saleProduct.price,
-      payment: salePayment,
-      productId: saleProduct.id,
-      quantity,
-    });
-    if (!saved) {
-      toast.error("Product is out of stock or the sales cart could not be saved");
-      return;
-    }
-    setSaleProduct(null);
-    setSaleQuantity("1");
   };
 
   const tiles = [
@@ -561,10 +568,11 @@ function ProductsPage() {
               <button
                 type="button"
                 onClick={addSale}
-                disabled={!saleProduct || saleProduct.quantity <= 0}
-                className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+                disabled={!saleProduct || saleProduct.quantity <= 0 || isAddingSale}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Add to Sales
+                {isAddingSale && <LoaderCircle className="size-4 animate-spin" />}
+                {isAddingSale ? "Adding..." : "Add to Sales"}
               </button>
             </div>
           </div>
