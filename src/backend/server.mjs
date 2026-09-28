@@ -93,14 +93,14 @@ async function start() {
           (sale.kind === "service"
             ? sale.deductStock === true
             : sale.stockDeducted !== false) &&
-          sale.historyRecorded !== true &&
           !historyRows.some(
             (entry) =>
-              entry.kind === sale.kind &&
-              entry.action === (sale.kind === "service" ? "Service" : "Sold") &&
-              entry.name === sale.name &&
-              Number(entry.qty) === Number(sale.qty) &&
-              Math.abs(new Date(entry.at).getTime() - new Date(sale.soldAt).getTime()) < 5000,
+              (sale.saleItemId && entry.saleItemId === sale.saleItemId) ||
+              (entry.kind === sale.kind &&
+                entry.action === (sale.kind === "service" ? "Service" : "Sold") &&
+                entry.name === sale.name &&
+                Number(entry.qty) === Number(sale.qty) &&
+                Math.abs(new Date(entry.at).getTime() - new Date(sale.soldAt).getTime()) < 5000),
           ),
       )
       .map((sale) => ({
