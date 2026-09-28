@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   ShieldCheck,
@@ -9,6 +9,7 @@ import {
   PackageCheck,
   UserRoundPlus,
   CircleDot,
+  LoaderCircle,
 } from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
 import { apiRequest } from "@/lib/api";
@@ -66,6 +67,11 @@ function NotificationsPage() {
   );
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
+  const [reviewingRequest, setReviewingRequest] = useState<{
+    id: string;
+    status: "approved" | "rejected";
+  } | null>(null);
+  const reviewingRequestRef = useRef(false);
   const loadRequests = () =>
     void apiRequest<{ requests: AccessRequest[] }>("/access-requests").then(
       (result) => result && setRequests(result.requests),
@@ -78,11 +84,21 @@ function NotificationsPage() {
     loadRequests();
     loadNotifications();
   }, []);
-  const review = (requestId: string, status: "approved" | "rejected") =>
-    void apiRequest(`/access-requests/${requestId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    }).then(loadRequests);
+  const review = async (requestId: string, status: "approved" | "rejected") => {
+    if (reviewingRequestRef.current) return;
+    reviewingRequestRef.current = true;
+    setReviewingRequest({ id: requestId, status });
+    try {
+      const result = await apiRequest(`/access-requests/${requestId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      if (result) loadRequests();
+    } finally {
+      reviewingRequestRef.current = false;
+      setReviewingRequest(null);
+    }
+  };
 
   return (
     <DashboardShell
@@ -127,14 +143,24 @@ function NotificationsPage() {
                     </div>
                     <button
                       onClick={() => review(request._id, "rejected")}
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs"
+                      disabled={reviewingRequest !== null}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      {reviewingRequest?.id === request._id &&
+                        reviewingRequest.status === "rejected" && (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        )}
                       Reject
                     </button>
                     <button
                       onClick={() => review(request._id, "approved")}
-                      className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+                      disabled={reviewingRequest !== null}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      {reviewingRequest?.id === request._id &&
+                        reviewingRequest.status === "approved" && (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        )}
                       Approve
                     </button>
                   </div>

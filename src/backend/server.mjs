@@ -82,18 +82,22 @@ async function start() {
   const historyWithUnloggedSales = async () => {
     const [historyRows, saleRows] = await Promise.all([
       history.find({}).sort({ at: -1 }).toArray(),
-      sales.find({ kind: "product" })
+      sales
+        .find({ kind: { $in: ["product", "service"] } })
         .sort({ soldAt: -1 })
         .toArray(),
     ]);
     const recoveredRows = saleRows
       .filter(
         (sale) =>
-          sale.stockDeducted !== false &&
+          (sale.kind === "service"
+            ? sale.deductStock === true
+            : sale.stockDeducted !== false) &&
           sale.historyRecorded !== true &&
           !historyRows.some(
             (entry) =>
-              entry.action === "Sold" &&
+              entry.kind === sale.kind &&
+              entry.action === (sale.kind === "service" ? "Service" : "Sold") &&
               entry.name === sale.name &&
               Number(entry.qty) === Number(sale.qty) &&
               Math.abs(new Date(entry.at).getTime() - new Date(sale.soldAt).getTime()) < 5000,
@@ -101,18 +105,22 @@ async function start() {
       )
       .map((sale) => ({
         id: String(sale._id),
-        kind: "product",
+        kind: sale.kind,
         name: sale.name,
-        action: "Sold",
+        action: sale.kind === "service" ? "Service" : "Sold",
         qty: Number(sale.qty),
         before: Number(sale.quantityBefore ?? 0),
         after: Number(sale.quantityAfter ?? 0),
         amount: Number(sale.price) * Number(sale.qty),
         note: sale.payment,
+        saleItemId: sale.saleItemId,
         at: sale.soldAt,
         recoveredFromSale: true,
       }));
-    return [...historyRows, ...recoveredRows].sort(
+    const visibleHistoryRows = historyRows.filter(
+      (entry) => !(entry.kind === "service" && entry.action === "Added"),
+    );
+    return [...visibleHistoryRows, ...recoveredRows].sort(
       (first, second) => new Date(second.at).getTime() - new Date(first.at).getTime(),
     );
   };
@@ -402,7 +410,7 @@ async function start() {
         const soldAt = new Date();
         const deductedByProduct = new Map();
         for (const item of items) {
-          let historyRecorded = true;
+          let historyRecorded = item.kind !== "service" || !deductStock;
           let quantityBefore;
           let quantityAfter;
           if (item.kind === "product") {
@@ -429,29 +437,35 @@ async function start() {
                 after: quantityAfter,
                 amount: Number(item.price) * Number(item.qty),
                 note: item.payment,
+                saleItemId: item.id,
                 at: soldAt,
               });
               deductedByProduct.set(String(item.productId), quantityAfter);
             }
           } else if (item.kind === "service") {
-            operation = `checkout: save service history for ${item.name}`;
-            historyRecorded = await saveHistory({
-              kind: "service",
-              name: item.name,
-              action: "Service",
-              qty: Number(item.qty),
-              before: 0,
-              after: 0,
-              amount: Number(item.price) * Number(item.qty),
-              note: item.payment,
-              at: soldAt,
-            });
+            if (deductStock) {
+              operation = `checkout: save service history for ${item.name}`;
+              historyRecorded = await saveHistory({
+                kind: "service",
+                name: item.name,
+                action: "Service",
+                qty: Number(item.qty),
+                before: 0,
+                after: 0,
+                amount: Number(item.price) * Number(item.qty),
+                note: item.payment,
+                saleItemId: item.id,
+                at: soldAt,
+              });
+            }
           }
           operation = `checkout: save sale for ${item.name}`;
           await sales.insertOne({
             ...item,
             soldAt,
+            saleItemId: item.id,
             stockDeducted: item.kind === "product" && deductStock,
+            deductStock,
             historyRecorded,
             quantityBefore,
             quantityAfter,
@@ -466,7 +480,7 @@ async function start() {
         const total = items.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0);
         operation = "checkout: create notification";
         await createNotification("sale", "Sale recorded", `${items.length} line items totaling KES ${total.toLocaleString()} were recorded.`);
-        return json(response, 201, { ok: true });
+        return json(response, 201, { ok: true, soldAt: soldAt.toISOString() });
       }
       if (request.method === "GET" && path === "/api/history")
         return json(response, 200, { history: await historyWithUnloggedSales() });

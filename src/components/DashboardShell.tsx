@@ -69,7 +69,7 @@ export function DashboardShell({
             </div>
           </div>
         </header>
-        <main className="grid-noise min-w-0 px-4 py-5 sm:px-6 sm:py-7 lg:px-8">{children}</main>
+        <main className="min-w-0 px-4 py-5 sm:px-6 sm:py-7 lg:px-8">{children}</main>
       </div>
     </div>
   );

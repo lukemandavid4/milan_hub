@@ -31,6 +31,7 @@ export type Sale = CartItem & { soldAt: string };
 
 export type HistoryEntry = {
   id: string;
+  saleItemId?: string;
   kind: "product" | "service";
   name: string;
   action: string;
@@ -195,6 +196,7 @@ export const actions = {
     delta: number,
     action = delta > 0 ? "Stock Added" : "Stock Deducted",
   ) {
+    await waitForHydration();
     const p = state.products.find((x) => x.id === id);
     if (!p) return false;
     const after = Math.max(0, p.quantity + delta);
@@ -284,19 +286,64 @@ export const actions = {
     await waitForHydration();
     if (state.cart.length === 0) return { ok: false, error: "There are no items to check out." };
     const items = state.cart;
-    const result = await apiRequestResult<{ ok: boolean }>("/sales/checkout", {
+    const result = await apiRequestResult<{ ok: boolean; soldAt?: string }>("/sales/checkout", {
       method: "POST",
       body: JSON.stringify({ items, deductStock }),
     });
     if (!result.ok) return { ok: false, error: result.error };
 
+    const soldAt = result.data?.soldAt ?? new Date().toISOString();
+    const remainingQuantity = new Map(state.products.map((product) => [product.id, product.quantity]));
+    const checkoutHistory: HistoryEntry[] = deductStock
+      ? items.map((item) => {
+          let before = 0;
+          let after = 0;
+          if (item.kind === "product" && item.productId) {
+            before = remainingQuantity.get(item.productId) ?? 0;
+            after = Math.max(0, before - item.qty);
+            remainingQuantity.set(item.productId, after);
+          }
+          return {
+            id: uid(),
+            saleItemId: item.id,
+            kind: item.kind,
+            name: item.name,
+            action: item.kind === "service" ? "Service" : "Sold",
+            qty: item.qty,
+            before,
+            after,
+            amount: item.price * item.qty,
+            note: item.payment,
+            at: soldAt,
+          };
+        })
+      : [];
+    const mergeCheckoutHistory = (existing: HistoryEntry[]) => {
+      const additions = checkoutHistory.filter(
+        (entry) =>
+          !existing.some(
+            (record) =>
+              record.saleItemId === entry.saleItemId ||
+              (record.kind === entry.kind &&
+                record.action === entry.action &&
+                record.name === entry.name &&
+                record.qty === entry.qty &&
+                record.amount === entry.amount &&
+                record.note === entry.note &&
+                Math.abs(new Date(record.at).getTime() - new Date(entry.at).getTime()) < 5000),
+          ),
+      );
+      return [...existing, ...additions].sort(
+        (first, second) => new Date(second.at).getTime() - new Date(first.at).getTime(),
+      );
+    };
+
     const remote = await apiRequest<AppState>("/state");
     if (remote) {
-      set(remote);
+      set({ ...remote, history: mergeCheckoutHistory(remote.history) });
       return { ok: true, error: null };
     }
 
-    const soldAt = new Date().toISOString();
     let products = state.products;
     for (const item of items) {
       if (item.kind === "product" && item.productId) {
@@ -310,12 +357,14 @@ export const actions = {
       products,
       cart: [],
       sales: [...items.map((c) => ({ ...c, soldAt })), ...state.sales],
+      history: mergeCheckoutHistory(state.history),
     });
     await apiRequest("/cart", { method: "PUT", body: JSON.stringify({ cart: [] }) });
     return { ok: true, error: null };
   },
 
   async addService(input: { name: string; price: number; description: string; payment: string }) {
+    await waitForHydration();
     const service: Service = {
       id: uid(),
       name: input.name,

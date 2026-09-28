@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Clock, CreditCard, ShoppingCart, Store, CheckCircle2, LoaderCircle, X } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { actions, formatKES, formatTime, SHOP_NAME, useAppState } from "@/lib/store";
@@ -8,10 +8,24 @@ import { useCurrentRole } from "@/lib/session";
 export function DailySalesDialog() {
   const [open, setOpen] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+  const removingItemRef = useRef(false);
+  const checkingOutRef = useRef(false);
   const role = useCurrentRole();
   const { cart } = useAppState();
   const count = cart.reduce((sum, item) => sum + item.qty, 0);
   const total = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
+  const removeCartItem = async (id: string) => {
+    if (removingItemRef.current || checkingOutRef.current) return;
+    removingItemRef.current = true;
+    setRemovingItemId(id);
+    try {
+      await actions.removeFromCart(id);
+    } finally {
+      removingItemRef.current = false;
+      setRemovingItemId(null);
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -65,11 +79,15 @@ export function DailySalesDialog() {
                   </span>
                   <button
                     aria-label={`Remove ${item.name}`}
-                    disabled={isCheckingOut}
-                    onClick={() => actions.removeFromCart(item.id)}
+                    disabled={isCheckingOut || removingItemId !== null}
+                    onClick={() => removeCartItem(item.id)}
                     className="grid size-7 place-items-center rounded-md text-destructive transition-colors hover:bg-destructive/12 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <X className="size-4" />
+                    {removingItemId === item.id ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <X className="size-4" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -93,8 +111,10 @@ export function DailySalesDialog() {
             <p className="text-lg font-bold text-primary">{formatKES(total)}</p>
           </div>
           <button
-            disabled={cart.length === 0 || isCheckingOut}
+            disabled={cart.length === 0 || isCheckingOut || removingItemId !== null}
             onClick={async () => {
+              if (checkingOutRef.current || removingItemRef.current) return;
+              checkingOutRef.current = true;
               setIsCheckingOut(true);
               try {
                 const result = await actions.checkout(role === "Admin");
@@ -105,6 +125,7 @@ export function DailySalesDialog() {
                 toast.success(role === "Admin" ? "Sale saved and stock deducted" : "Sale saved");
                 setOpen(false);
               } finally {
+                checkingOutRef.current = false;
                 setIsCheckingOut(false);
               }
             }}

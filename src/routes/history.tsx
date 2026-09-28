@@ -26,9 +26,10 @@ function HistoryPage() {
       history.filter((record) => {
         const matchesMonth = monthKey(record.at) === selectedMonth;
         const matchesType = filter === "all" || record.kind === filter;
+        const isServiceCreation = record.kind === "service" && record.action === "Added";
         const matchesQuery =
           !query.trim() || record.name.toLowerCase().includes(query.trim().toLowerCase());
-        return matchesMonth && matchesType && matchesQuery;
+        return matchesMonth && matchesType && matchesQuery && !isServiceCreation;
       }),
     [filter, history, query, selectedMonth],
   );

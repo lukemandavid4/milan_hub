@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Trash2, Wrench } from "lucide-react";
+import { useRef, useState } from "react";
+import { LoaderCircle, Trash2, Wrench } from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +43,10 @@ function ServicesPage() {
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
   const [payment, setPayment] = useState("M-Pesa");
+  const [isAddingService, setIsAddingService] = useState(false);
+  const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
+  const addingServiceRef = useRef(false);
+  const deletingServiceRef = useRef(false);
 
   const addService = async () => {
     const amount = Number(price);
@@ -50,21 +54,44 @@ function ServicesPage() {
       toast.error("Service name and a valid price are required");
       return;
     }
+    if (addingServiceRef.current) return;
+    addingServiceRef.current = true;
+    setIsAddingService(true);
 
-    const persisted = await actions.addService({
-      name: name.trim(),
-      price: amount,
-      description: description.trim(),
-      payment,
-    });
-    toast[persisted ? "success" : "error"](
-      persisted
-        ? "Service saved to MongoDB"
-        : "Service saved locally, but MongoDB could not be reached",
-    );
-    setName("");
-    setPrice("");
-    setDescription("");
+    try {
+      const persisted = await actions.addService({
+        name: name.trim(),
+        price: amount,
+        description: description.trim(),
+        payment,
+      });
+      toast[persisted ? "success" : "error"](
+        persisted
+          ? "Service saved to MongoDB"
+          : "Service saved locally, but MongoDB could not be reached",
+      );
+      setName("");
+      setPrice("");
+      setDescription("");
+    } finally {
+      addingServiceRef.current = false;
+      setIsAddingService(false);
+    }
+  };
+
+  const deleteService = async (id: string) => {
+    if (deletingServiceRef.current) return;
+    deletingServiceRef.current = true;
+    setDeletingServiceId(id);
+    try {
+      const persisted = await actions.deleteService(id);
+      toast[persisted ? "success" : "error"](
+        persisted ? "Service deleted" : "Service could not be deleted from the database",
+      );
+    } finally {
+      deletingServiceRef.current = false;
+      setDeletingServiceId(null);
+    }
   };
 
   return (
@@ -131,9 +158,11 @@ function ServicesPage() {
 
         <button
           onClick={addService}
-          className="mt-5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow glow-ring"
+          disabled={isAddingService}
+          className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow glow-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Add Service to Daily Sales
+          {isAddingService && <LoaderCircle className="size-4 animate-spin" />}
+          {isAddingService ? "Adding Service..." : "Add Service to Daily Sales"}
         </button>
       </section>
 
@@ -171,17 +200,15 @@ function ServicesPage() {
                   <td className="px-3 py-4 text-right">
                     <button
                       aria-label={`Delete ${service.name}`}
-                      onClick={async () => {
-                        const persisted = await actions.deleteService(service.id);
-                        toast[persisted ? "success" : "error"](
-                          persisted
-                            ? "Service deleted"
-                            : "Service could not be deleted from the database",
-                        );
-                      }}
-                      className="inline-grid size-8 place-items-center rounded-lg text-destructive transition-colors hover:bg-destructive/12"
+                      onClick={() => deleteService(service.id)}
+                      disabled={deletingServiceId !== null}
+                      className="inline-grid size-8 place-items-center rounded-lg text-destructive transition-colors hover:bg-destructive/12 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Trash2 className="size-4" />
+                      {deletingServiceId === service.id ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-4" />
+                      )}
                     </button>
                   </td>
                 </tr>

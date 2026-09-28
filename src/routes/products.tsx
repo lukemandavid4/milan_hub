@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Plus,
   Search,
@@ -119,6 +119,14 @@ function ProductsPage() {
   const [saleQuantity, setSaleQuantity] = useState("1");
   const [salePayment, setSalePayment] = useState<"M-Pesa" | "Cash">("M-Pesa");
   const [isAddingSale, setIsAddingSale] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [pendingProductAction, setPendingProductAction] = useState<{
+    id: string;
+    action: "add" | "deduct" | "delete";
+  } | null>(null);
+  const savingProductRef = useRef(false);
+  const productActionRef = useRef(false);
+  const addingSaleRef = useRef(false);
 
   const filtered = useMemo(
     () =>
@@ -158,48 +166,79 @@ function ProductsPage() {
       toast.error("Product name and category are required");
       return;
     }
+    if (savingProductRef.current) return;
+    savingProductRef.current = true;
+    setIsSavingProduct(true);
     const quantity = Number(draft.quantity) || 0;
     const price = Number(draft.price) || 0;
-    if (editingId) {
-      const persisted = await actions.updateProduct(editingId, {
-        name: draft.name.trim(),
-        category: draft.category,
-        quantity,
-        price,
-        spec: draft.description,
-      });
-      if (!persisted) {
-        toast.error("Product could not be saved to the database");
-        return;
+    try {
+      if (editingId) {
+        const persisted = await actions.updateProduct(editingId, {
+          name: draft.name.trim(),
+          category: draft.category,
+          quantity,
+          price,
+          spec: draft.description,
+        });
+        if (!persisted) {
+          toast.error("Product could not be saved to the database");
+          return;
+        }
+        toast.success("Product updated");
+      } else {
+        const persisted = await actions.addProduct({
+          name: draft.name.trim(),
+          category: draft.category,
+          quantity,
+          price,
+          description: draft.description,
+        });
+        toast[persisted ? "success" : "error"](
+          persisted ? "Product saved to MongoDB" : "Product could not be saved to the database",
+        );
+        if (!persisted) return;
       }
-      toast.success("Product updated");
-    } else {
-      const persisted = await actions.addProduct({
-        name: draft.name.trim(),
-        category: draft.category,
-        quantity,
-        price,
-        description: draft.description,
-      });
-      toast[persisted ? "success" : "error"](
-        persisted
-          ? "Product saved to MongoDB"
-          : "Product could not be saved to the database",
-      );
-      if (!persisted) return;
+      setFormOpen(false);
+    } finally {
+      savingProductRef.current = false;
+      setIsSavingProduct(false);
     }
-    setFormOpen(false);
   };
 
   const adjust = async (id: string, delta: number) => {
-    const persisted = await actions.adjustStock(id, delta);
-    toast[persisted ? "success" : "error"](
-      persisted ? "Stock updated" : "Stock could not be saved to the database",
-    );
+    if (productActionRef.current) return;
+    productActionRef.current = true;
+    const action = delta > 0 ? "add" : "deduct";
+    setPendingProductAction({ id, action });
+    try {
+      const persisted = await actions.adjustStock(id, delta);
+      toast[persisted ? "success" : "error"](
+        persisted ? "Stock updated" : "Stock could not be saved to the database",
+      );
+    } finally {
+      productActionRef.current = false;
+      setPendingProductAction(null);
+    }
+  };
+
+  const deleteProduct = async (id: string) => {
+    if (productActionRef.current) return;
+    productActionRef.current = true;
+    setPendingProductAction({ id, action: "delete" });
+    try {
+      const persisted = await actions.deleteProduct(id);
+      toast[persisted ? "success" : "error"](
+        persisted ? "Product deleted" : "Product could not be deleted from the database",
+      );
+    } finally {
+      productActionRef.current = false;
+      setPendingProductAction(null);
+    }
   };
 
   const addSale = async () => {
-    if (!saleProduct || isAddingSale) return;
+    if (!saleProduct || addingSaleRef.current) return;
+    addingSaleRef.current = true;
     setIsAddingSale(true);
     try {
       if (saleProduct.quantity <= 0) {
@@ -223,6 +262,7 @@ function ProductsPage() {
       setSaleProduct(null);
       setSaleQuantity("1");
     } finally {
+      addingSaleRef.current = false;
       setIsAddingSale(false);
     }
   };
@@ -364,28 +404,57 @@ function ProductsPage() {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48 bg-card">
-                            {role === "Admin" && <DropdownMenuItem onClick={() => openEdit(p)}>
-                              <Pencil className="size-4" /> Edit Product
-                            </DropdownMenuItem>}
-                            {role === "Admin" && <DropdownMenuItem onClick={() => adjust(p.id, 1)}>
-                              <PackagePlus className="size-4" /> Add Stock
-                            </DropdownMenuItem>}
-                            {role === "Admin" && <DropdownMenuItem onClick={() => adjust(p.id, -1)}>
-                              <Minus className="size-4" /> Deduct Stock
-                            </DropdownMenuItem>}
-                            {role === "Admin" && <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={async () => {
-                                const persisted = await actions.deleteProduct(p.id);
-                                toast[persisted ? "success" : "error"](
-                                  persisted
-                                    ? "Product deleted"
-                                    : "Product could not be deleted from the database",
-                                );
-                              }}
-                            >
-                              <Trash2 className="size-4" /> Delete
-                            </DropdownMenuItem>}
+                            {role === "Admin" && (
+                              <DropdownMenuItem
+                                disabled={pendingProductAction !== null}
+                                onClick={() => openEdit(p)}
+                              >
+                                <Pencil className="size-4" /> Edit Product
+                              </DropdownMenuItem>
+                            )}
+                            {role === "Admin" && (
+                              <DropdownMenuItem
+                                disabled={pendingProductAction !== null}
+                                onClick={() => adjust(p.id, 1)}
+                              >
+                                {pendingProductAction?.id === p.id &&
+                                pendingProductAction.action === "add" ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                  <PackagePlus className="size-4" />
+                                )}{" "}
+                                Add Stock
+                              </DropdownMenuItem>
+                            )}
+                            {role === "Admin" && (
+                              <DropdownMenuItem
+                                disabled={pendingProductAction !== null}
+                                onClick={() => adjust(p.id, -1)}
+                              >
+                                {pendingProductAction?.id === p.id &&
+                                pendingProductAction.action === "deduct" ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                  <Minus className="size-4" />
+                                )}{" "}
+                                Deduct Stock
+                              </DropdownMenuItem>
+                            )}
+                            {role === "Admin" && (
+                              <DropdownMenuItem
+                                disabled={pendingProductAction !== null}
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => deleteProduct(p.id)}
+                              >
+                                {pendingProductAction?.id === p.id &&
+                                pendingProductAction.action === "delete" ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="size-4" />
+                                )}{" "}
+                                Delete
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -480,16 +549,19 @@ function ProductsPage() {
             </div>
             <div className="flex justify-end gap-3 pt-1">
               <button
+                disabled={isSavingProduct}
                 onClick={() => setFormOpen(false)}
-                className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={save}
-                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow"
+                disabled={isSavingProduct}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {editingId ? "Save Changes" : "Save Product"}
+                {isSavingProduct && <LoaderCircle className="size-4 animate-spin" />}
+                {isSavingProduct ? "Saving..." : editingId ? "Save Changes" : "Save Product"}
               </button>
             </div>
           </div>

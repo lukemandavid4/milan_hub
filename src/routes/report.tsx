@@ -1,7 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDownRight, ArrowUpRight, Box, ChartNoAxesColumnIncreasing, Save } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Box,
+  ChartNoAxesColumnIncreasing,
+  LoaderCircle,
+  Save,
+} from "lucide-react";
 import { DashboardShell } from "@/components/DashboardShell";
 import { apiRequest } from "@/lib/api";
 import { useAppState } from "@/lib/store";
@@ -34,45 +50,74 @@ export const Route = createFileRoute("/report")({
 
 function ReportPage() {
   const { history } = useAppState();
+  const stockHistory = useMemo(
+    () => history.filter((entry) => entry.kind === "product"),
+    [history],
+  );
   const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
+  const [isSavingReport, setIsSavingReport] = useState(false);
+  const savingReportRef = useRef(false);
   useEffect(() => {
     void apiRequest<{ reports: SavedReport[] }>("/reports").then((result) => {
       if (result) setSavedReports(result.reports);
     });
   }, []);
   const movement = useMemo(() => {
+    const dateKey = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const today = new Date();
     const byDate = new Map<string, { date: string; added: number; deducted: number }>();
-    history.forEach((entry) => {
-      const date = entry.at.slice(0, 10);
-      const row = byDate.get(date) ?? { date, added: 0, deducted: 0 };
-      if (entry.action.includes("Added") || entry.action === "Created") row.added += entry.qty;
+    for (let offset = 13; offset >= 0; offset -= 1) {
+      const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
+      byDate.set(dateKey(day), {
+        date: new Intl.DateTimeFormat("en-KE", { month: "short", day: "numeric" }).format(day),
+        added: 0,
+        deducted: 0,
+      });
+    }
+    stockHistory.forEach((entry) => {
+      const row = byDate.get(dateKey(new Date(entry.at)));
+      if (!row) return;
+      if (
+        entry.action.includes("Added") ||
+        entry.action === "Created" ||
+        (entry.action === "Stock Updated" && entry.after > entry.before)
+      )
+        row.added += entry.qty;
       if (
         entry.action.includes("Deducted") ||
         entry.action === "Sold" ||
-        entry.action === "Deleted"
+        entry.action === "Deleted" ||
+        (entry.action === "Stock Updated" && entry.after < entry.before)
       )
         row.deducted += entry.qty;
-      byDate.set(date, row);
     });
-    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14);
-  }, [history]);
+    return [...byDate.values()];
+  }, [stockHistory]);
+  const hasMovement = movement.some((day) => day.added > 0 || day.deducted > 0);
   const metrics = [
     {
       label: "Total Added",
-      value: history
-        .filter((entry) => entry.action.includes("Added") || entry.action === "Created")
+      value: stockHistory
+        .filter(
+          (entry) =>
+            entry.action.includes("Added") ||
+            entry.action === "Created" ||
+            (entry.action === "Stock Updated" && entry.after > entry.before),
+        )
         .reduce((sum, entry) => sum + entry.qty, 0),
       icon: ArrowUpRight,
       style: "text-primary bg-primary/12",
     },
     {
       label: "Total Deducted",
-      value: history
+      value: stockHistory
         .filter(
           (entry) =>
             entry.action.includes("Deducted") ||
             entry.action === "Sold" ||
-            entry.action === "Deleted",
+            entry.action === "Deleted" ||
+            (entry.action === "Stock Updated" && entry.after < entry.before),
         )
         .reduce((sum, entry) => sum + entry.qty, 0),
       icon: ArrowDownRight,
@@ -80,42 +125,50 @@ function ReportPage() {
     },
     {
       label: "Total Transactions",
-      value: history.length,
+      value: stockHistory.length,
       icon: Box,
       style: "text-primary bg-primary/12",
     },
     {
       label: "Avg Daily Movement",
       value: movement.length
-        ? Math.round(history.reduce((sum, entry) => sum + entry.qty, 0) / movement.length)
+        ? Math.round(stockHistory.reduce((sum, entry) => sum + entry.qty, 0) / movement.length)
         : 0,
       icon: ChartNoAxesColumnIncreasing,
       style: "text-warning bg-warning/12",
     },
   ];
   const saveReport = async () => {
+    if (savingReportRef.current) return;
+    savingReportRef.current = true;
+    setIsSavingReport(true);
     const generatedAt = new Date().toISOString();
-    const result = await apiRequest<{ report: SavedReport }>("/reports", {
-      method: "POST",
-      body: JSON.stringify({
-        title: `Stock Report · ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date(generatedAt))}`,
-        data: {
-          movement,
-          totals: {
-            added: metrics[0].value,
-            deducted: metrics[1].value,
-            transactions: history.length,
-            quantityChanged: history.reduce((sum, entry) => sum + entry.qty, 0),
+    try {
+      const result = await apiRequest<{ report: SavedReport }>("/reports", {
+        method: "POST",
+        body: JSON.stringify({
+          title: `Stock Report · ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date(generatedAt))}`,
+          data: {
+            movement,
+            totals: {
+              added: metrics[0].value,
+              deducted: metrics[1].value,
+              transactions: stockHistory.length,
+              quantityChanged: stockHistory.reduce((sum, entry) => sum + entry.qty, 0),
+            },
           },
-        },
-      }),
-    });
-    if (!result) {
-      toast.error("Report could not be saved to the database");
-      return;
+        }),
+      });
+      if (!result) {
+        toast.error("Report could not be saved to the database");
+        return;
+      }
+      setSavedReports((reports) => [result.report, ...reports]);
+      toast.success("Report snapshot saved");
+    } finally {
+      savingReportRef.current = false;
+      setIsSavingReport(false);
     }
-    setSavedReports((reports) => [result.report, ...reports]);
-    toast.success("Report snapshot saved");
   };
   return (
     <DashboardShell
@@ -125,9 +178,15 @@ function ReportPage() {
         <button
           type="button"
           onClick={saveReport}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground sm:px-4 sm:text-sm"
+          disabled={isSavingReport}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:px-4 sm:text-sm"
         >
-          <Save className="size-4" /> Save Report
+          {isSavingReport ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : (
+            <Save className="size-4" />
+          )}
+          {isSavingReport ? "Saving..." : "Save Report"}
         </button>
       }
     >
@@ -151,11 +210,11 @@ function ReportPage() {
           Stock additions and deductions over the last 14 days
         </p>
         <div className="mt-6 h-[310px]">
-          {movement.length > 0 ? (
+          {hasMovement ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={movement}>
+              <BarChart data={movement} barCategoryGap="22%" barGap={4}>
                 <CartesianGrid
-                  vertical={false}
+                  vertical
                   stroke="var(--color-border)"
                   strokeDasharray="4 6"
                 />
@@ -165,12 +224,14 @@ function ReportPage() {
                   tickLine={false}
                   axisLine={false}
                   fontSize={11}
+                  tickMargin={8}
                 />
                 <YAxis
                   stroke="var(--color-muted-foreground)"
                   tickLine={false}
                   axisLine={false}
                   fontSize={11}
+                  allowDecimals={false}
                 />
                 <Tooltip
                   cursor={{ fill: "color-mix(in oklab, var(--color-primary) 8%, transparent)" }}
@@ -181,8 +242,19 @@ function ReportPage() {
                     color: "var(--color-foreground)",
                   }}
                 />
-                <Bar dataKey="added" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="deducted" fill="var(--color-destructive)" radius={[4, 4, 0, 0]} />
+                <Legend />
+                <Bar
+                  dataKey="added"
+                  name="Added"
+                  fill="var(--color-primary)"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar
+                  dataKey="deducted"
+                  name="Deducted"
+                  fill="var(--color-destructive)"
+                  radius={[4, 4, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -216,14 +288,14 @@ function ReportPage() {
               </tr>
             </thead>
             <tbody>
-              {history.length === 0 && (
+              {stockHistory.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">
                     No stock activity yet.
                   </td>
                 </tr>
               )}
-              {history.map((entry) => (
+              {stockHistory.map((entry) => (
                 <tr key={entry.id} className="border-b border-border/70 text-muted-foreground">
                   <td className="px-3 py-3 text-foreground">{entry.name}</td>
                   <td className="px-3 py-3">{entry.action}</td>

@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Store,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import loginBackground from "@/assets/login-tech-bg.jpg";
 import { apiRequestResult } from "@/lib/api";
 import { createSession } from "@/lib/session";
@@ -29,40 +29,46 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [requestingAccess, setRequestingAccess] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setIsSigningIn(true);
-    if (requestingAccess) {
-      const result = await apiRequestResult("/auth/request-access", {
-        method: "POST",
-        body: JSON.stringify({ email, password, confirmPassword, role }),
-      });
-      setIsSigningIn(false);
-      if (result.ok) {
-        toast.success("Access request submitted for admin approval");
-        setRequestingAccess(false);
-        setPassword("");
-        setConfirmPassword("");
-      } else {
-        toast.error(result.error || "Access request failed");
-      }
-    } else {
-      const result = await apiRequestResult<{ user: { email: string; role: string } }>(
-        "/auth/login",
-        {
+    try {
+      if (requestingAccess) {
+        const result = await apiRequestResult("/auth/request-access", {
           method: "POST",
-          body: JSON.stringify({ email, password }),
-        },
-      );
-      setIsSigningIn(false);
-      if (result.ok && result.data?.user) {
-        createSession(result.data.user.email, result.data.user.role);
-        toast.success("Signed in successfully");
-        navigate({ to: "/" });
+          body: JSON.stringify({ email, password, confirmPassword, role }),
+        });
+        if (result.ok) {
+          toast.success("Access request submitted for admin approval");
+          setRequestingAccess(false);
+          setPassword("");
+          setConfirmPassword("");
+        } else {
+          toast.error(result.error || "Access request failed");
+        }
       } else {
-        toast.error(result.error || "Only approved accounts can sign in");
+        const result = await apiRequestResult<{ user: { email: string; role: string } }>(
+          "/auth/login",
+          {
+            method: "POST",
+            body: JSON.stringify({ email, password }),
+          },
+        );
+        if (result.ok && result.data?.user) {
+          createSession(result.data.user.email, result.data.user.role);
+          toast.success("Signed in successfully");
+          navigate({ to: "/" });
+        } else {
+          toast.error(result.error || "Only approved accounts can sign in");
+        }
       }
+    } finally {
+      submittingRef.current = false;
+      setIsSigningIn(false);
     }
   };
 
