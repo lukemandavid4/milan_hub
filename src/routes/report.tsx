@@ -1,10 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -15,17 +14,13 @@ import {
   ArrowUpRight,
   Box,
   ChartNoAxesColumnIncreasing,
-  LoaderCircle,
-  Save,
+  Download,
 } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { DashboardShell } from "@/components/DashboardShell";
-import { apiRequest } from "@/lib/api";
 import { useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import { requireSession } from "@/lib/session";
-
-type SavedReport = { id: string; title: string; generatedAt: string };
 
 export const Route = createFileRoute("/report")({
   beforeLoad: requireSession,
@@ -50,33 +45,24 @@ export const Route = createFileRoute("/report")({
 
 function ReportPage() {
   const { history } = useAppState();
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const stockHistory = useMemo(
-    () => history.filter((entry) => entry.kind === "product"),
-    [history],
+    () =>
+      history.filter(
+        (entry) => entry.kind === "product" && entry.at.slice(0, 7) === selectedMonth,
+      ),
+    [history, selectedMonth],
   );
-  const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
-  const [isSavingReport, setIsSavingReport] = useState(false);
-  const savingReportRef = useRef(false);
-  useEffect(() => {
-    void apiRequest<{ reports: SavedReport[] }>("/reports").then((result) => {
-      if (result) setSavedReports(result.reports);
-    });
-  }, []);
   const movement = useMemo(() => {
-    const dateKey = (date: Date) =>
-      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    const today = new Date();
-    const byDate = new Map<string, { date: string; added: number; deducted: number }>();
-    for (let offset = 13; offset >= 0; offset -= 1) {
-      const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
-      byDate.set(dateKey(day), {
-        date: new Intl.DateTimeFormat("en-KE", { month: "short", day: "numeric" }).format(day),
-        added: 0,
-        deducted: 0,
-      });
-    }
+    const [year, month] = selectedMonth.split("-").map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const byDate = Array.from({ length: daysInMonth }, (_, index) => ({
+      day: index + 1,
+      added: 0,
+      deducted: 0,
+    }));
     stockHistory.forEach((entry) => {
-      const row = byDate.get(dateKey(new Date(entry.at)));
+      const row = byDate[Number(entry.at.slice(8, 10)) - 1];
       if (!row) return;
       if (
         entry.action.includes("Added") ||
@@ -92,8 +78,8 @@ function ReportPage() {
       )
         row.deducted += entry.qty;
     });
-    return [...byDate.values()];
-  }, [stockHistory]);
+    return byDate;
+  }, [selectedMonth, stockHistory]);
   const hasMovement = movement.some((day) => day.added > 0 || day.deducted > 0);
   const metrics = [
     {
@@ -138,56 +124,143 @@ function ReportPage() {
       style: "text-warning bg-warning/12",
     },
   ];
-  const saveReport = async () => {
-    if (savingReportRef.current) return;
-    savingReportRef.current = true;
-    setIsSavingReport(true);
-    const generatedAt = new Date().toISOString();
-    try {
-      const result = await apiRequest<{ report: SavedReport }>("/reports", {
-        method: "POST",
-        body: JSON.stringify({
-          title: `Stock Report · ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date(generatedAt))}`,
-          data: {
-            movement,
-            totals: {
-              added: metrics[0].value,
-              deducted: metrics[1].value,
-              transactions: stockHistory.length,
-              quantityChanged: stockHistory.reduce((sum, entry) => sum + entry.qty, 0),
-            },
-          },
-        }),
+  const monthLabel = new Intl.DateTimeFormat("en-KE", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${selectedMonth}-01T12:00:00`));
+  const downloadReport = () => {
+    const pdf = new jsPDF({ orientation: "landscape" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const monthTitle = monthLabel;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(20);
+    pdf.text("Milan Hub Stock Report", 14, 17);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(11);
+    pdf.text(monthTitle, 14, 25);
+    pdf.setFontSize(9);
+    pdf.text(`Generated ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date())}`, pageWidth - 14, 17, { align: "right" });
+
+    pdf.setDrawColor(210, 216, 214);
+    pdf.line(14, 31, pageWidth - 14, 31);
+    pdf.setFontSize(10);
+    pdf.text(`Units added: ${metrics[0].value.toLocaleString()}`, 14, 40);
+    pdf.text(`Units deducted: ${metrics[1].value.toLocaleString()}`, 82, 40);
+    pdf.text(`Transactions: ${metrics[2].value.toLocaleString()}`, 166, 40);
+
+    const chartLeft = 16;
+    const chartTop = 54;
+    const chartWidth = pageWidth - 32;
+    const chartHeight = 49;
+    const maxValue = Math.max(1, ...movement.flatMap((day) => [day.added, day.deducted]));
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(11);
+    pdf.text("Daily Stock Movement", chartLeft, 50);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    for (let line = 0; line <= 4; line += 1) {
+      const y = chartTop + (chartHeight * line) / 4;
+      pdf.setDrawColor(226, 231, 229);
+      pdf.line(chartLeft, y, chartLeft + chartWidth, y);
+      pdf.setTextColor(100, 108, 106);
+      pdf.text(String(Math.round((maxValue * (4 - line)) / 4)), chartLeft - 2, y - 1, {
+        align: "right",
       });
-      if (!result) {
-        toast.error("Report could not be saved to the database");
-        return;
-      }
-      setSavedReports((reports) => [result.report, ...reports]);
-      toast.success("Report snapshot saved");
-    } finally {
-      savingReportRef.current = false;
-      setIsSavingReport(false);
     }
+    const slotWidth = chartWidth / movement.length;
+    const barWidth = Math.max(1, Math.min(4, slotWidth * 0.28));
+    movement.forEach((day, index) => {
+      const center = chartLeft + slotWidth * (index + 0.5);
+      const addedHeight = (day.added / maxValue) * chartHeight;
+      const deductedHeight = (day.deducted / maxValue) * chartHeight;
+      pdf.setFillColor(28, 168, 105);
+      if (addedHeight > 0) pdf.rect(center - barWidth - 0.5, chartTop + chartHeight - addedHeight, barWidth, addedHeight, "F");
+      pdf.setFillColor(220, 65, 65);
+      if (deductedHeight > 0) pdf.rect(center + 0.5, chartTop + chartHeight - deductedHeight, barWidth, deductedHeight, "F");
+      if (index % (movement.length > 20 ? 3 : 1) === 0) {
+        pdf.setTextColor(90, 98, 96);
+        pdf.text(String(day.day), center, chartTop + chartHeight + 6, { align: "center" });
+      }
+    });
+    pdf.setFillColor(28, 168, 105);
+    pdf.rect(pageWidth - 72, 48, 3, 3, "F");
+    pdf.setTextColor(65, 73, 71);
+    pdf.text("Added", pageWidth - 67, 51);
+    pdf.setFillColor(220, 65, 65);
+    pdf.rect(pageWidth - 42, 48, 3, 3, "F");
+    pdf.text("Deducted", pageWidth - 37, 51);
+
+    let rowY = 122;
+    const columnX = [14, 92, 124, 162, 184, 220];
+    const tableHeaders = ["Item", "Type", "Action", "Qty", "Amount (KES)", "Date"];
+    const drawTableHeader = () => {
+      pdf.setFillColor(239, 243, 241);
+      pdf.rect(14, rowY - 5, pageWidth - 28, 9, "F");
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8);
+      pdf.setTextColor(35, 43, 41);
+      tableHeaders.forEach((header, index) => pdf.text(header, columnX[index], rowY));
+      rowY += 10;
+      pdf.setFont("helvetica", "normal");
+    };
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(11);
+    pdf.setTextColor(25, 33, 31);
+    pdf.text("Monthly Activity", 14, 116);
+    drawTableHeader();
+    const sortedHistory = [...stockHistory].sort(
+      (first, second) => new Date(second.at).getTime() - new Date(first.at).getTime(),
+    );
+    if (sortedHistory.length === 0) {
+      pdf.setFontSize(9);
+      pdf.text("No stock activity recorded for this month.", 14, rowY + 3);
+    }
+    for (const entry of sortedHistory) {
+      if (rowY > 195) {
+        pdf.addPage();
+        rowY = 18;
+        drawTableHeader();
+      }
+      const values = [
+        pdf.splitTextToSize(entry.name, 72)[0] ?? entry.name,
+        "Product",
+        entry.action,
+        String(entry.qty),
+        entry.amount.toLocaleString(),
+        new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date(entry.at)),
+      ];
+      pdf.setFontSize(8);
+      pdf.setTextColor(55, 63, 61);
+      values.forEach((value, index) => pdf.text(value, columnX[index], rowY));
+      pdf.setDrawColor(232, 236, 234);
+      pdf.line(14, rowY + 3, pageWidth - 14, rowY + 3);
+      rowY += 9;
+    }
+    pdf.save(`milan-hub-stock-report-${selectedMonth}.pdf`);
   };
   return (
     <DashboardShell
       title="Stock Report"
-      subtitle="30-day inventory movement overview"
+      subtitle={`Inventory movement for ${monthLabel}`}
       action={
-        <button
-          type="button"
-          onClick={saveReport}
-          disabled={isSavingReport}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:px-4 sm:text-sm"
-        >
-          {isSavingReport ? (
-            <LoaderCircle className="size-4 animate-spin" />
-          ) : (
-            <Save className="size-4" />
-          )}
-          {isSavingReport ? "Saving..." : "Save Report"}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            aria-label="Report month"
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => {
+              if (event.target.value) setSelectedMonth(event.target.value);
+            }}
+            className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-xs text-muted-foreground outline-none"
+          />
+          <button
+            type="button"
+            onClick={downloadReport}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground sm:px-4 sm:text-sm"
+          >
+            <Download className="size-4" /> Download PDF
+          </button>
+        </div>
       }
     >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -207,7 +280,7 @@ function ReportPage() {
       <section className="panel mt-5 p-5 lg:p-6">
         <h2 className="text-lg font-semibold">Daily Stock Movement</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Stock additions and deductions over the last 14 days
+          Product stock additions and deductions for {monthLabel}
         </p>
         <div className="mt-6 h-[310px]">
           {hasMovement ? (
@@ -219,7 +292,8 @@ function ReportPage() {
                   strokeDasharray="4 6"
                 />
                 <XAxis
-                  dataKey="date"
+                  dataKey="day"
+                  tickFormatter={(day: number) => String(day)}
                   stroke="var(--color-muted-foreground)"
                   tickLine={false}
                   axisLine={false}
@@ -242,7 +316,6 @@ function ReportPage() {
                     color: "var(--color-foreground)",
                   }}
                 />
-                <Legend />
                 <Bar
                   dataKey="added"
                   name="Added"
@@ -262,7 +335,7 @@ function ReportPage() {
               <div className="text-center">
                 <ChartNoAxesColumnIncreasing className="mx-auto size-7 text-muted-foreground" />
                 <p className="mt-3 text-sm text-muted-foreground">
-                  No stock movement recorded yet.
+                  No stock movement recorded for {monthLabel}.
                 </p>
               </div>
             </div>
@@ -273,7 +346,7 @@ function ReportPage() {
       <section className="panel mt-5 p-5 lg:p-6">
         <h2 className="text-lg font-semibold">Recent Activity</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Latest stock movements in the last 30 days
+          Stock movements recorded in {monthLabel}
         </p>
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
@@ -312,28 +385,6 @@ function ReportPage() {
               ))}
             </tbody>
           </table>
-        </div>
-      </section>
-      <section className="mt-5 border-t border-border pt-5">
-        <h2 className="text-base font-semibold">Saved Reports</h2>
-        <div className="mt-3 space-y-2">
-          {savedReports.slice(0, 8).map((report) => (
-            <div
-              key={report.id}
-              className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 py-3 text-sm"
-            >
-              <span className="font-medium">{report.title}</span>
-              <time className="text-xs text-muted-foreground">
-                {new Intl.DateTimeFormat("en-KE", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }).format(new Date(report.generatedAt))}
-              </time>
-            </div>
-          ))}
-          {savedReports.length === 0 && (
-            <p className="py-3 text-sm text-muted-foreground">No saved report snapshots.</p>
-          )}
         </div>
       </section>
     </DashboardShell>

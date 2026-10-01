@@ -125,7 +125,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var root=document.documentElement;var login=location.pathname==='/login';var t=localStorage.getItem('milanhub-theme');var mobile=matchMedia('(max-width: 767px)').matches;var role=localStorage.getItem('milanhub-user-role');if(login){t='dark';localStorage.setItem('milanhub-theme','dark')}root.dataset.loginDark=login?'true':'false';root.classList.toggle('dark',login||t!=='light');root.dataset.userRole=role&&role.toLowerCase()==='seller'?'Seller':'Admin';root.dataset.sidebarCollapsed=mobile||localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false'}catch(e){}})()",
+              "(function(){try{var root=document.documentElement;var login=location.pathname==='/login';var t=localStorage.getItem('milanhub-theme');var mobile=matchMedia('(max-width: 767px)').matches;var email=localStorage.getItem('milanhub-user-email');var role=localStorage.getItem('milanhub-user-role');var expiry=Number(localStorage.getItem('milanhub-session-expires-at'));var valid=Boolean(email&&role&&Number.isFinite(expiry)&&expiry>Date.now());if(!valid){localStorage.removeItem('milanhub-user-email');localStorage.removeItem('milanhub-user-role');localStorage.removeItem('milanhub-session-expires-at')}if(login){t='dark';localStorage.setItem('milanhub-theme','dark')}root.dataset.sessionExpired=!login&&!valid?'true':'false';root.dataset.loginDark=login?'true':'false';root.classList.toggle('dark',login||t!=='light');root.dataset.userRole=valid&&role.toLowerCase()==='seller'?'Seller':'Admin';root.dataset.sidebarCollapsed=mobile||localStorage.getItem('milanhub-sidebar-collapsed')==='true'?'true':'false';if(!login&&!valid)location.replace('/login')}catch(e){}})()",
           }}
         />
       </head>
@@ -143,6 +143,16 @@ function RootComponent() {
 
   useLayoutEffect(() => {
     const isLogin = pathname === "/login";
+    if (isLogin) {
+      document.documentElement.dataset.sessionExpired = "false";
+    } else if (!hasValidSession()) {
+      document.documentElement.dataset.sessionExpired = "true";
+      clearSession();
+      window.location.replace("/login");
+      return;
+    } else {
+      document.documentElement.dataset.sessionExpired = "false";
+    }
     document.documentElement.dataset.loginDark = String(isLogin);
     if (isLogin) {
       window.localStorage.setItem("milanhub-theme", "dark");
@@ -164,20 +174,26 @@ function SessionExpiryRedirect() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const navigate = useNavigate();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     let timer: number | undefined;
     let redirecting = false;
     const checkSession = () => {
       if (timer !== undefined) window.clearTimeout(timer);
-      if (pathname === "/login" || redirecting) return;
+      if (pathname === "/login") {
+        document.documentElement.dataset.sessionExpired = "false";
+        return;
+      }
+      if (redirecting) return;
       if (!hasValidSession()) {
         redirecting = true;
+        document.documentElement.dataset.sessionExpired = "true";
         clearSession();
         void navigate({ to: "/login", replace: true });
         return;
       }
       timer = window.setTimeout(() => {
         redirecting = true;
+        document.documentElement.dataset.sessionExpired = "true";
         clearSession();
         void navigate({ to: "/login", replace: true });
       }, Math.max(0, getSessionExpiry() - Date.now()));

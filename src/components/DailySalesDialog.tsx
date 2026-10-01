@@ -49,7 +49,7 @@ export function DailySalesDialog() {
           <p className="mt-2 text-sm text-muted-foreground">
             {role === "Admin"
               ? `Items sold at ${SHOP_NAME}. Deduct stock when ready.`
-              : `Record sales at ${SHOP_NAME}. Stock levels will not be changed.`}
+              : `Items are queued for an Admin to complete checkout and deduct stock.`}
           </p>
         </div>
 
@@ -110,34 +110,32 @@ export function DailySalesDialog() {
             <p className="text-sm font-semibold">Shop Total ({count} items)</p>
             <p className="text-lg font-bold text-primary">{formatKES(total)}</p>
           </div>
-          <button
-            disabled={cart.length === 0 || isCheckingOut || removingItemId !== null}
-            onClick={async () => {
-              if (checkingOutRef.current || removingItemRef.current) return;
-              checkingOutRef.current = true;
-              setIsCheckingOut(true);
-              try {
-                const result = await actions.checkout(role === "Admin");
-                if (!result.ok) {
-                  toast.error(result.error || "Sale could not be saved. Your cart is still available to retry.");
-                  return;
+          {role === "Admin" && (
+            <button
+              disabled={cart.length === 0 || isCheckingOut || removingItemId !== null}
+              onClick={async () => {
+                if (checkingOutRef.current || removingItemRef.current) return;
+                checkingOutRef.current = true;
+                setIsCheckingOut(true);
+                try {
+                  const result = await actions.checkout(true);
+                  if (!result.ok) {
+                    toast.error(result.error || "Sale could not be saved. Your cart is still available to retry.");
+                    return;
+                  }
+                  toast.success("Sale saved and stock deducted");
+                  setOpen(false);
+                } finally {
+                  checkingOutRef.current = false;
+                  setIsCheckingOut(false);
                 }
-                toast.success(role === "Admin" ? "Sale saved and stock deducted" : "Sale saved");
-                setOpen(false);
-              } finally {
-                checkingOutRef.current = false;
-                setIsCheckingOut(false);
-              }
-            }}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isCheckingOut ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-            {isCheckingOut
-              ? "Saving sale..."
-              : role === "Admin"
-                ? `Deduct ${SHOP_NAME} Stock`
-                : "Record Sales"}
-          </button>
+              }}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-glow disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isCheckingOut ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+              {isCheckingOut ? "Saving sale..." : `Deduct ${SHOP_NAME} Stock`}
+            </button>
+          )}
         </div>
       </SheetContent>
     </Sheet>

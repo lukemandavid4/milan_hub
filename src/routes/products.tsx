@@ -117,6 +117,7 @@ function ProductsPage() {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [saleProduct, setSaleProduct] = useState<Product | null>(null);
   const [saleQuantity, setSaleQuantity] = useState("1");
+  const [salePrice, setSalePrice] = useState("");
   const [salePayment, setSalePayment] = useState<"M-Pesa" | "Cash">("M-Pesa");
   const [isAddingSale, setIsAddingSale] = useState(false);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
@@ -238,6 +239,11 @@ function ProductsPage() {
 
   const addSale = async () => {
     if (!saleProduct || addingSaleRef.current) return;
+    const price = Number(salePrice);
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("Enter a valid sale price");
+      return;
+    }
     addingSaleRef.current = true;
     setIsAddingSale(true);
     try {
@@ -250,7 +256,7 @@ function ProductsPage() {
       const saved = await actions.addToCart({
         kind: "product",
         name: saleProduct.name,
-        price: saleProduct.price,
+        price: Number(salePrice),
         payment: salePayment,
         productId: saleProduct.id,
         quantity,
@@ -261,6 +267,7 @@ function ProductsPage() {
       }
       setSaleProduct(null);
       setSaleQuantity("1");
+      setSalePrice("");
     } finally {
       addingSaleRef.current = false;
       setIsAddingSale(false);
@@ -385,7 +392,10 @@ function ProductsPage() {
                     <td className="px-3 py-3.5">
                       <button
                         disabled={p.quantity <= 0}
-                        onClick={() => setSaleProduct(p)}
+                        onClick={() => {
+                          setSaleProduct(p);
+                          setSalePrice(String(p.price));
+                        }}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-border disabled:hover:text-muted-foreground"
                       >
                         <ShoppingCart className="size-3.5" /> {p.quantity <= 0 ? "Out of stock" : "Add"}
@@ -592,8 +602,11 @@ function ProductsPage() {
                 <Label htmlFor="sale-price">Price per unit (KES)</Label>
                 <Input
                   id="sale-price"
-                  value={saleProduct?.price ?? 0}
-                  readOnly
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={salePrice}
+                  onChange={(event) => setSalePrice(event.target.value)}
                   className="bg-surface-2"
                 />
               </div>
@@ -607,8 +620,7 @@ function ProductsPage() {
               <span>Listed: KES {saleProduct?.price.toLocaleString() ?? 0}</span>
             </div>
             <div className="rounded-xl border border-border bg-surface-2 p-4 text-center text-lg font-bold">
-              Total: KES{" "}
-              {((saleProduct?.price ?? 0) * (Number(saleQuantity) || 0)).toLocaleString()}
+              Total: KES {(Number(salePrice || 0) * (Number(saleQuantity) || 0)).toLocaleString()}
             </div>
             <div>
               <Label>Payment Method</Label>

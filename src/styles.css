@@ -179,6 +179,10 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  html[data-session-expired="true"] body {
+    visibility: hidden;
+  }
+
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,
