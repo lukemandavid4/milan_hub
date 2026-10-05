@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import {
   Plus,
@@ -56,6 +56,10 @@ import { requireSession, useCurrentRole } from "@/lib/session";
 
 export const Route = createFileRoute("/products")({
   beforeLoad: requireSession,
+  validateSearch: (search: Record<string, unknown>) => ({
+    status:
+      search.status === "low-stock" || search.status === "out-of-stock" ? search.status : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Products — Milan Hub Inventory" },
@@ -109,6 +113,7 @@ const emptyDraft: Draft = { name: "", category: "", quantity: "", price: "", des
 
 function ProductsPage() {
   const { products: items } = useAppState();
+  const { status: statusFilter } = Route.useSearch();
   const role = useCurrentRole();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
@@ -139,9 +144,10 @@ function ProductsPage() {
           p.sku.toLowerCase().includes(q) ||
           p.spec.toLowerCase().includes(q);
         const matchC = category === "All" || p.category === category;
-        return matchQ && matchC;
+        const matchStatus = !statusFilter || statusOf(p) === statusFilter;
+        return matchQ && matchC && matchStatus;
       }),
-    [items, query, category],
+    [items, query, category, statusFilter],
   );
 
   const openAdd = () => {
@@ -338,6 +344,16 @@ function ProductsPage() {
               className="bg-surface-2 pl-9"
             />
           </div>
+          {statusFilter && (
+            <Link
+              to="/products"
+              search={{ status: undefined }}
+              className="text-sm font-medium text-primary transition-colors hover:text-primary-glow"
+            >
+              Showing {statusLabels[statusFilter]}
+              {" · "}Clear
+            </Link>
+          )}
           <button
             data-admin-only
             onClick={openAdd}
@@ -398,7 +414,8 @@ function ProductsPage() {
                         }}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-border disabled:hover:text-muted-foreground"
                       >
-                        <ShoppingCart className="size-3.5" /> {p.quantity <= 0 ? "Out of stock" : "Add"}
+                        <ShoppingCart className="size-3.5" />{" "}
+                        {p.quantity <= 0 ? "Out of stock" : "Add"}
                       </button>
                     </td>
                     <td className="px-3 py-3.5">

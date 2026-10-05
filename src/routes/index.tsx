@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -16,6 +16,13 @@ import { categories, statusOf, type ActivityKind } from "@/data/inventory";
 import { useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/")({
   beforeLoad: requireSession,
@@ -80,6 +87,8 @@ const activityStyles: Record<
 
 function Dashboard() {
   const { products, history } = useAppState();
+  const [stockView, setStockView] = useState<"low-stock" | "out-of-stock" | null>(null);
+  const [activityExpanded, setActivityExpanded] = useState(false);
   const totals = useMemo(
     () => ({
       units: products.reduce((sum, product) => sum + product.quantity, 0),
@@ -114,6 +123,9 @@ function Dashboard() {
       minute: "2-digit",
     }).format(new Date(entry.at)),
   }));
+  const stockProducts = stockView
+    ? products.filter((product) => statusOf(product) === stockView)
+    : [];
   const kpis = [
     {
       label: "Total Stock",
@@ -142,37 +154,90 @@ function Dashboard() {
       <div className="grid gap-5 md:grid-cols-3">
         {kpis.map(({ label, value, sub, icon: Icon, tone }) => {
           const s = toneStyles[tone];
-          return (
-            <div
-              key={label}
-              className="panel group relative overflow-hidden p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    {label}
-                  </p>
-                  <p className={cn("mt-3 font-display text-4xl font-bold", s.value)}>{value}</p>
-                  <p className="mt-2 text-sm text-muted-foreground">{sub}</p>
-                </div>
-                <span className={cn("grid size-11 place-items-center rounded-xl", s.icon)}>
-                  <Icon className="size-5" />
-                </span>
+          const content = (
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {label}
+                </p>
+                <p className={cn("mt-3 font-display text-4xl font-bold", s.value)}>{value}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{sub}</p>
               </div>
+              <span className={cn("grid size-11 place-items-center rounded-xl", s.icon)}>
+                <Icon className="size-5" />
+              </span>
+            </div>
+          );
+          const className =
+            "panel group relative w-full overflow-hidden p-5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40";
+
+          if (tone === "warning" || tone === "destructive") {
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setStockView(tone === "warning" ? "low-stock" : "out-of-stock")}
+                className={cn(className, "cursor-pointer")}
+              >
+                {content}
+              </button>
+            );
+          }
+
+          return (
+            <div key={label} className={className}>
+              {content}
             </div>
           );
         })}
       </div>
 
-      <div className="mt-6 grid gap-5 lg:items-start lg:grid-cols-5">
-        <section className="panel p-5 lg:col-span-3">
+      <Dialog open={stockView !== null} onOpenChange={(open) => !open && setStockView(null)}>
+        <DialogContent className="grid max-h-[80vh] max-w-xl grid-rows-[auto_1fr]">
+          <DialogHeader>
+            <DialogTitle>
+              {stockView === "low-stock" ? "Low Stock Items" : "Out of Stock Items"}
+            </DialogTitle>
+            <DialogDescription>
+              {stockProducts.length} {stockProducts.length === 1 ? "product" : "products"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="thin-scrollbar min-h-0 overflow-y-auto pr-2">
+            {stockProducts.length > 0 ? (
+              <ul className="divide-y divide-border">
+                {stockProducts.map((product) => (
+                  <li key={product.id} className="flex items-center justify-between gap-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{product.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {product.category} · {product.sku}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-right text-sm font-semibold">
+                      {product.quantity}{" "}
+                      <span className="font-normal text-muted-foreground">in stock</span>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No {stockView === "low-stock" ? "low-stock" : "out-of-stock"} products.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div className="mt-6 grid gap-5 lg:items-stretch lg:grid-cols-5">
+        <section className="panel flex h-[430px] min-h-0 flex-col p-5 lg:col-span-3">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold">Stock by Category</h2>
               <p className="text-sm text-muted-foreground">Units on hand across product lines</p>
             </div>
           </div>
-          <div className="mt-6 h-[300px]">
+          <div className="mt-6 min-h-0 flex-1">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={categoryStock} barSize={38}>
                 <CartesianGrid
@@ -214,17 +279,27 @@ function Dashboard() {
           </div>
         </section>
 
-        <section className="panel min-h-[430px] p-5 lg:col-span-2">
+        <section
+          className={cn(
+            "panel flex min-h-0 flex-col p-5 transition-[height] duration-300 lg:col-span-2",
+            activityExpanded ? "h-[560px]" : "h-[430px]",
+          )}
+        >
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold">Recent Activity</h2>
-              <p className="text-sm text-muted-foreground">Live stock movement feed</p>
+              <p className="text-sm text-muted-foreground">Stock movement feed</p>
             </div>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-primary">
-              <span className="size-2 animate-pulse rounded-full bg-primary" /> Live
-            </span>
+            <button
+              type="button"
+              aria-expanded={activityExpanded}
+              onClick={() => setActivityExpanded((expanded) => !expanded)}
+              className="text-sm font-medium text-primary transition-colors hover:text-primary-glow"
+            >
+              {activityExpanded ? "Show less" : "View all"}
+            </button>
           </div>
-          <ul className="mt-4 divide-y divide-border">
+          <ul className="thin-scrollbar mt-4 min-h-0 flex-1 divide-y divide-border overflow-y-auto">
             {activity.map((a) => {
               const s = activityStyles[a.kind];
               const Icon = s.icon;
