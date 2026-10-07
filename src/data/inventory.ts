@@ -22,7 +22,7 @@ export const categories = [
   "Cables",
   "Gaming",
   "Smart Home",
-  "Wearables",
+  "Electricals",
   "Networking",
   "Phone Screens",
   "Phone Covers",

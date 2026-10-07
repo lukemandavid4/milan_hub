@@ -94,7 +94,7 @@ const categoryIcons: Record<string, React.ComponentType<{ className?: string }>>
   Cables: Cable,
   Gaming: Gamepad2,
   "Smart Home": House,
-  Wearables: Watch,
+  Electricals: Watch,
   "Phone Screens": Tablet,
   "Phone Covers": Smartphone,
   "Kitchen Appliances": CookingPot,
