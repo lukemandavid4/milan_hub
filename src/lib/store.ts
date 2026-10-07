@@ -130,6 +130,7 @@ export const actions = {
       quantity: input.quantity,
       threshold: 3,
       price: input.price,
+      createdAt: new Date().toISOString(),
       updated: new Date().toISOString(),
     };
     const persisted = await apiRequest("/products", {
@@ -293,7 +294,9 @@ export const actions = {
     if (!result.ok) return { ok: false, error: result.error };
 
     const soldAt = result.data?.soldAt ?? new Date().toISOString();
-    const remainingQuantity = new Map(state.products.map((product) => [product.id, product.quantity]));
+    const remainingQuantity = new Map(
+      state.products.map((product) => [product.id, product.quantity]),
+    );
     const checkoutHistory: HistoryEntry[] = deductStock
       ? items.map((item) => {
           let before = 0;

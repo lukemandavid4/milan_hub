@@ -1,18 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useMemo, useRef, useState } from "react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   ArrowDownRight,
   ArrowUpRight,
   Box,
+  CalendarDays,
   ChartNoAxesColumnIncreasing,
   Download,
 } from "lucide-react";
@@ -44,12 +37,27 @@ export const Route = createFileRoute("/report")({
 });
 
 function ReportPage() {
-  const { history } = useAppState();
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const { products, history } = useAppState();
+  const monthInputRef = useRef<HTMLInputElement>(null);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const dateParts = (value: string) => {
+    const date = new Date(value);
+    return {
+      month: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
+      day: date.getDate(),
+    };
+  };
+  const productsAddedThisMonth = useMemo(
+    () => products.filter((product) => dateParts(product.createdAt).month === selectedMonth),
+    [products, selectedMonth],
+  );
   const stockHistory = useMemo(
     () =>
       history.filter(
-        (entry) => entry.kind === "product" && entry.at.slice(0, 7) === selectedMonth,
+        (entry) => entry.kind === "product" && dateParts(entry.at).month === selectedMonth,
       ),
     [history, selectedMonth],
   );
@@ -62,50 +70,30 @@ function ReportPage() {
       deducted: 0,
     }));
     stockHistory.forEach((entry) => {
-      const row = byDate[Number(entry.at.slice(8, 10)) - 1];
+      const row = byDate[dateParts(entry.at).day - 1];
       if (!row) return;
-      if (
-        entry.action.includes("Added") ||
-        entry.action === "Created" ||
-        (entry.action === "Stock Updated" && entry.after > entry.before)
-      )
-        row.added += entry.qty;
-      if (
-        entry.action.includes("Deducted") ||
-        entry.action === "Sold" ||
-        entry.action === "Deleted" ||
-        (entry.action === "Stock Updated" && entry.after < entry.before)
-      )
-        row.deducted += entry.qty;
+      const change = entry.after - entry.before;
+      if (change > 0) row.added += change;
+      if (change < 0) row.deducted += Math.abs(change);
     });
     return byDate;
   }, [selectedMonth, stockHistory]);
   const hasMovement = movement.some((day) => day.added > 0 || day.deducted > 0);
+  const totalAdded = productsAddedThisMonth.reduce((sum, product) => sum + product.quantity, 0);
+  const totalDeducted = stockHistory.reduce(
+    (sum, entry) => sum + Math.max(0, entry.before - entry.after),
+    0,
+  );
   const metrics = [
     {
       label: "Total Added",
-      value: stockHistory
-        .filter(
-          (entry) =>
-            entry.action.includes("Added") ||
-            entry.action === "Created" ||
-            (entry.action === "Stock Updated" && entry.after > entry.before),
-        )
-        .reduce((sum, entry) => sum + entry.qty, 0),
+      value: totalAdded,
       icon: ArrowUpRight,
       style: "text-primary bg-primary/12",
     },
     {
       label: "Total Deducted",
-      value: stockHistory
-        .filter(
-          (entry) =>
-            entry.action.includes("Deducted") ||
-            entry.action === "Sold" ||
-            entry.action === "Deleted" ||
-            (entry.action === "Stock Updated" && entry.after < entry.before),
-        )
-        .reduce((sum, entry) => sum + entry.qty, 0),
+      value: totalDeducted,
       icon: ArrowDownRight,
       style: "text-destructive bg-destructive/12",
     },
@@ -139,7 +127,12 @@ function ReportPage() {
     pdf.setFontSize(11);
     pdf.text(monthTitle, 14, 25);
     pdf.setFontSize(9);
-    pdf.text(`Generated ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date())}`, pageWidth - 14, 17, { align: "right" });
+    pdf.text(
+      `Generated ${new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(new Date())}`,
+      pageWidth - 14,
+      17,
+      { align: "right" },
+    );
 
     pdf.setDrawColor(210, 216, 214);
     pdf.line(14, 31, pageWidth - 14, 31);
@@ -174,9 +167,23 @@ function ReportPage() {
       const addedHeight = (day.added / maxValue) * chartHeight;
       const deductedHeight = (day.deducted / maxValue) * chartHeight;
       pdf.setFillColor(28, 168, 105);
-      if (addedHeight > 0) pdf.rect(center - barWidth - 0.5, chartTop + chartHeight - addedHeight, barWidth, addedHeight, "F");
+      if (addedHeight > 0)
+        pdf.rect(
+          center - barWidth - 0.5,
+          chartTop + chartHeight - addedHeight,
+          barWidth,
+          addedHeight,
+          "F",
+        );
       pdf.setFillColor(220, 65, 65);
-      if (deductedHeight > 0) pdf.rect(center + 0.5, chartTop + chartHeight - deductedHeight, barWidth, deductedHeight, "F");
+      if (deductedHeight > 0)
+        pdf.rect(
+          center + 0.5,
+          chartTop + chartHeight - deductedHeight,
+          barWidth,
+          deductedHeight,
+          "F",
+        );
       if (index % (movement.length > 20 ? 3 : 1) === 0) {
         pdf.setTextColor(90, 98, 96);
         pdf.text(String(day.day), center, chartTop + chartHeight + 6, { align: "center" });
@@ -244,14 +251,30 @@ function ReportPage() {
       subtitle={`Inventory movement for ${monthLabel}`}
       action={
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={`Choose report month. Current month: ${monthLabel}`}
+            onClick={() => {
+              if (monthInputRef.current?.showPicker) {
+                monthInputRef.current.showPicker();
+              } else {
+                monthInputRef.current?.click();
+              }
+            }}
+            className="inline-flex h-10 w-full cursor-pointer items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary sm:w-auto"
+          >
+            <CalendarDays className="size-4" />
+            <span>{monthLabel}</span>
+          </button>
           <input
+            ref={monthInputRef}
             aria-label="Report month"
             type="month"
             value={selectedMonth}
             onChange={(event) => {
               if (event.target.value) setSelectedMonth(event.target.value);
             }}
-            className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-xs text-muted-foreground outline-none"
+            className="sr-only"
           />
           <button
             type="button"
@@ -286,11 +309,7 @@ function ReportPage() {
           {hasMovement ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={movement} barCategoryGap="22%" barGap={4}>
-                <CartesianGrid
-                  vertical
-                  stroke="var(--color-border)"
-                  strokeDasharray="4 6"
-                />
+                <CartesianGrid vertical stroke="var(--color-border)" strokeDasharray="4 6" />
                 <XAxis
                   dataKey="day"
                   tickFormatter={(day: number) => String(day)}

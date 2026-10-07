@@ -9,6 +9,7 @@ export type Product = {
   quantity: number;
   threshold: number;
   price: number;
+  createdAt: string;
   updated: string;
 };
 
@@ -45,9 +46,7 @@ export const statusLabels: Record<StockStatus, string> = {
 
 export const categoryStock = categories.map((category) => ({
   category,
-  units: products
-    .filter((p) => p.category === category)
-    .reduce((sum, p) => sum + p.quantity, 0),
+  units: products.filter((p) => p.category === category).reduce((sum, p) => sum + p.quantity, 0),
 }));
 
 export const totals = {
